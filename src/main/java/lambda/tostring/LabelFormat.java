@@ -30,21 +30,32 @@ public final class LabelFormat {
     private LabelFormat() {}
 
     /**
-     * Called by {@link LambdaToStringAgent} with the raw agent argument string.
-     * Recognises {@code format=<pattern>} (supports {@code \\n} / {@code \\t} escapes).
-     * The {@code format} value extends to end-of-string so it may contain commas.
-     * Other key=value pairs before {@code format=} are silently ignored.
+     * Called by {@link LambdaToStringAgent} before the agent jar is added to the bootstrap
+     * classloader search.  Parses {@code format=<pattern>} from the agent arg string, writes
+     * it to the system property, and updates {@link #pattern} on this copy.
+     *
+     * <p>Writing the system property is the only way to propagate the value to the bootstrap
+     * classloader's copy of this class (which initialises its own {@code pattern} field from
+     * {@link System#getProperty} and never sees a direct {@code configure} call).
      */
     static void configure(String agentArgs) {
-        if (agentArgs == null || agentArgs.isEmpty()) return;
-        // Search for "format=" key.  Everything after it (to end of string) is the pattern,
-        // so comma-containing patterns like "Lambda[%i,%c]" work correctly.
+        String parsed = parseFormat(agentArgs);
+        if (parsed == null) return;
+        System.setProperty(SYSTEM_PROPERTY, parsed);
+        pattern = parsed;
+    }
+
+    /**
+     * Parses the {@code format=<pattern>} key from the agent argument string.
+     * The value extends to end-of-string so patterns containing commas are supported.
+     * Returns the unescaped pattern, or {@code null} if not present or malformed.
+     */
+    private static String parseFormat(String agentArgs) {
+        if (agentArgs == null || agentArgs.isEmpty()) return null;
         int idx = agentArgs.indexOf("format=");
-        if (idx < 0) return;
-        // Verify it is either at position 0 or preceded by a comma (key boundary)
-        if (idx > 0 && agentArgs.charAt(idx - 1) != ',') return;
-        String raw = agentArgs.substring(idx + "format=".length());
-        pattern = unescape(raw);
+        if (idx < 0) return null;
+        if (idx > 0 && agentArgs.charAt(idx - 1) != ',') return null;
+        return unescape(agentArgs.substring(idx + "format=".length()));
     }
 
     /**

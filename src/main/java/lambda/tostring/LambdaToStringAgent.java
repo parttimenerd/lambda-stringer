@@ -14,6 +14,9 @@ public class LambdaToStringAgent {
     }
 
     private static void install(String args, Instrumentation inst) {
+        // Propagate format= arg as a system property BEFORE adding the jar to the
+        // bootstrap classloader search.  LabelFormat may be loaded by two classloaders
+        // (app + bootstrap); the system property is the only shared channel between them.
         LabelFormat.configure(args);
         try {
             var src = LambdaToStringAgent.class.getProtectionDomain().getCodeSource();
