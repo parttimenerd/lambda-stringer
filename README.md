@@ -92,7 +92,7 @@ log.info("registered handler: {}", handler);
 Attach the agent to your Spring Boot application — no code changes required:
 
 ```sh
-java -javaagent:lambda-stringer-0.1.jar -jar my-app.jar
+java -javaagent:lambda-stringer.jar -jar my-app.jar
 ```
 
 Spring's `@EventListener`, `@Scheduled`, and `ApplicationListener` lambdas will all have readable labels in logs and thread dumps.
@@ -119,7 +119,7 @@ log.atDebug()
 
 ```sh
 # Compact format for log ingestion pipelines
-java -javaagent:lambda-stringer-0.1.jar=format=%c#%m:%l -jar my-app.jar
+java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar my-app.jar
 # → com.example.Scheduler#buildTask:42
 ```
 
@@ -132,7 +132,7 @@ Java 25+
 ```sh
 git clone https://github.com/parttimenerd/lambda-stringer
 cd lambda-stringer
-mvn package -DskipTests    # builds target/lambda-stringer-0.1.jar
+mvn package -DskipTests    # builds target/lambda-stringer.jar
 mvn package                # build + run all tests
 ```
 
@@ -149,7 +149,7 @@ make bench-baseline  # benchmark WITHOUT agent (for comparison)
 Attach the agent to any Java 25+ application — no source changes required:
 
 ```sh
-java -javaagent:target/lambda-stringer-0.1.jar -jar your-app.jar
+java -javaagent:target/lambda-stringer.jar -jar your-app.jar
 ```
 
 Every lambda's `toString()` now returns a label like:
@@ -162,13 +162,13 @@ Lambda[Supplier @ com.example.MyService.buildFactory(MyService.java:87)]
 The label format is configurable. Pass a `format=` argument to the agent:
 
 ```sh
-java -javaagent:target/lambda-stringer-0.1.jar=format=%i@%c#%m:%l -jar your-app.jar
+java -javaagent:target/lambda-stringer.jar=format=%i@%c#%m:%l -jar your-app.jar
 # → Supplier@com.example.MyService#buildFactory:87
 ```
 
 Or set a system property before the agent loads:
 ```sh
-java -Dlambda.tostring.format="%s::%m:%l" -javaagent:target/lambda-stringer-1.0.jar ...
+java -Dlambda.tostring.format="%s::%m:%l" -javaagent:target/lambda-stringer.jar ...
 # → MyService::buildFactory:87
 ```
 

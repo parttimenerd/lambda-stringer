@@ -61,10 +61,10 @@ jobs:
           gh release create "v0.1-${SHORT}" \
             --title "${SUBJECT} (${DATE})" \
             --notes "${BODY}Commit: \`${SHA}\`" \
-            target/lambda-stringer-0.1.jar#lambda-stringer-0.1.jar
+            target/lambda-stringer.jar#lambda-stringer.jar
           # Also update the floating "latest" tag to this release for easy wget access.
           gh release create latest \
             --title "Latest: ${SUBJECT} (${DATE})" \
             --notes "Latest build. See [v0.1-${SHORT}](https://github.com/${{ github.repository }}/releases/tag/v0.1-${SHORT}) for details." \
             --prerelease \
-            target/lambda-stringer-0.1.jar#lambda-stringer-0.1.jar
+            target/lambda-stringer.jar#lambda-stringer.jar

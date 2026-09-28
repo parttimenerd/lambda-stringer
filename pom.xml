@@ -9,10 +9,47 @@
   <version>0.1</version>
   <packaging>jar</packaging>
 
+  <name>lambda-stringer</name>
+  <description>A Java agent that gives every lambda expression a human-readable toString()</description>
+  <url>https://github.com/parttimenerd/lambda-stringer</url>
+
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>parttimenerd</id>
+      <name>Johannes Bechberger</name>
+      <email>me@mostlynerdless.de</email>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:git@github.com:parttimenerd/lambda-stringer.git</connection>
+    <developerConnection>scm:git:https://github.com/parttimenerd/lambda-stringer.git</developerConnection>
+    <url>https://github.com/parttimenerd/lambda-stringer</url>
+  </scm>
+
+  <distributionManagement>
+    <snapshotRepository>
+      <id>ossrh</id>
+      <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+    </snapshotRepository>
+    <repository>
+      <id>ossrh</id>
+      <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+    </repository>
+  </distributionManagement>
+
   <properties>
     <maven.compiler.source>25</maven.compiler.source>
     <maven.compiler.target>25</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Versioned jar used by Surefire; plain jar is the release artifact name. -->
     <agent.jar>${project.build.directory}/${project.artifactId}-${project.version}.jar</agent.jar>
   </properties>
 
@@ -26,11 +63,24 @@
   </dependencies>
 
   <build>
+    <!-- Produce target/lambda-stringer.jar (no version suffix) as the primary artifact. -->
+    <finalName>${project.artifactId}</finalName>
+
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <release>25</release>
+        </configuration>
+      </plugin>
+
       <!--
         Build an unshaded agent jar early (process-classes phase, before tests) so
         Surefire can reference it via -javaagent. maven-shade-plugin replaces it
         with the full fat jar at package time.
+        The versioned name is used here so the shade plugin can overwrite it cleanly.
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -57,6 +107,7 @@
         </executions>
       </plugin>
 
+      <!-- Fat jar: shades everything into target/lambda-stringer.jar -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
@@ -91,14 +142,78 @@
         </configuration>
       </plugin>
 
+      <!-- Sources jar — required for Maven Central -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.13.0</version>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.3.0</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals><goal>jar-no-fork</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Javadoc jar — required for Maven Central -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals><goal>jar</goal></goals>
+          </execution>
+        </executions>
         <configuration>
+          <doclint>none</doclint>
+          <quiet>true</quiet>
           <release>25</release>
         </configuration>
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- Activate with: mvn deploy -P release -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.1.0</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals><goal>sign</goal></goals>
+                <configuration>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.7.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>ossrh</publishingServerId>
+              <autoPublish>true</autoPublish>
+              <waitUntil>uploaded</waitUntil>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+
 </project>
