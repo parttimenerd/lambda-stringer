@@ -268,13 +268,13 @@ public class WrappingMetafactory {
         /**
          * Builds the synthetic annotation StackTraceElement.
          *
-         * <p>Format: {@code "// ^ via λ created in EnclosingClass.method(File.java:line)"}
-         * The {@code ^} arrow points to the executor frame above it.
+         * <p>The class-name slot contains {@code "// ^ via <label>"} where label is the
+         * already-formatted toString() string (honouring the user's configured format).
          * The real file/line are preserved so IDEs can navigate to the creation site on click.
          */
         private StackTraceElement creationFrame() {
             return new StackTraceElement(
-                    "// ^ via " + ifaceName + " λ created in " + creationClass,
+                    "// ^ via " + label,
                     creationMethod,
                     creationFile,
                     creationLine);
