@@ -92,7 +92,7 @@ log.info("registered handler: {}", handler);
 Attach the agent to your Spring Boot application — no code changes required:
 
 ```sh
-java -javaagent:lambda-stringer-1.0.jar -jar my-app.jar
+java -javaagent:lambda-stringer-0.1.jar -jar my-app.jar
 ```
 
 Spring's `@EventListener`, `@Scheduled`, and `ApplicationListener` lambdas will all have readable labels in logs and thread dumps.
@@ -119,7 +119,7 @@ log.atDebug()
 
 ```sh
 # Compact format for log ingestion pipelines
-java -javaagent:lambda-stringer-1.0.jar=format=%c#%m:%l -jar my-app.jar
+java -javaagent:lambda-stringer-0.1.jar=format=%c#%m:%l -jar my-app.jar
 # → com.example.Scheduler#buildTask:42
 ```
 
@@ -132,7 +132,7 @@ Java 25+
 ```sh
 git clone https://github.com/parttimenerd/lambda-stringer
 cd lambda-stringer
-mvn package -DskipTests    # builds target/lambda-stringer-1.0.jar
+mvn package -DskipTests    # builds target/lambda-stringer-0.1.jar
 mvn package                # build + run all tests
 ```
 
@@ -149,7 +149,7 @@ make bench-baseline  # benchmark WITHOUT agent (for comparison)
 Attach the agent to any Java 25+ application — no source changes required:
 
 ```sh
-java -javaagent:target/lambda-stringer-1.0.jar -jar your-app.jar
+java -javaagent:target/lambda-stringer-0.1.jar -jar your-app.jar
 ```
 
 Every lambda's `toString()` now returns a label like:
@@ -162,7 +162,7 @@ Lambda[Supplier @ com.example.MyService.buildFactory(MyService.java:87)]
 The label format is configurable. Pass a `format=` argument to the agent:
 
 ```sh
-java -javaagent:target/lambda-stringer-1.0.jar=format=%i@%c#%m:%l -jar your-app.jar
+java -javaagent:target/lambda-stringer-0.1.jar=format=%i@%c#%m:%l -jar your-app.jar
 # → Supplier@com.example.MyService#buildFactory:87
 ```
 
@@ -174,15 +174,15 @@ java -Dlambda.tostring.format="%s::%m:%l" -javaagent:target/lambda-stringer-1.0.
 
 ### Available tokens
 
-| Token | Meaning | Example |
-|-------|---------|---------|
-| `%i`  | functional interface simple name | `Runnable` |
+| Token | Meaning                              | Example           |
+|-------|--------------------------------------|-------------------|
+| `%i`  | functional interface simple name     | `Runnable`        |
 | `%c`  | enclosing class fully-qualified name | `com.example.Foo` |
-| `%s`  | enclosing class simple name | `Foo` |
-| `%m`  | enclosing method name | `bar` |
-| `%f`  | source file name | `Foo.java` |
-| `%l`  | line number (`?` if unavailable) | `42` |
-| `%%`  | literal `%` | `%` |
+| `%s`  | enclosing class simple name          | `Foo`             |
+| `%m`  | enclosing method name                | `bar`             |
+| `%f`  | source file name                     | `Foo.java`        |
+| `%l`  | line number (`?` if unavailable)     | `42`              |
+| `%%`  | literal `%`                          | `%`               |
 
 Default pattern: `Lambda[%i @ %c.%m(%f:%l)]`
 
@@ -192,11 +192,11 @@ The label is computed **once per call site** at class-load time (bootstrap), not
 
 Typical overhead measured with the built-in benchmark (`make bench` vs `make bench-baseline`):
 
-| Scenario | Without agent | With agent |
-|---|---|---|
-| Create non-capturing lambda | ~2 ns | ~2 ns (singleton cached at bootstrap) |
-| Invoke pre-created lambda | ~1 ns | ~35 ns (Proxy dispatch) |
-| `toString()` on lambda | ~4 ns | ~4 ns (field read, unchanged) |
+| Scenario                    | Without agent | With agent                            |
+|-----------------------------|---------------|---------------------------------------|
+| Create non-capturing lambda | ~2 ns         | ~2 ns (singleton cached at bootstrap) |
+| Invoke pre-created lambda   | ~1 ns         | ~35 ns (Proxy dispatch)               |
+| `toString()` on lambda      | ~4 ns         | ~4 ns (field read, unchanged)         |
 
 _Numbers from an M-series Mac; results vary by JVM and hardware._
 

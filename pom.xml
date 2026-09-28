@@ -6,7 +6,7 @@
 
   <groupId>me.bechberger</groupId>
   <artifactId>lambda-stringer</artifactId>
-  <version>1.0</version>
+  <version>0.1</version>
   <packaging>jar</packaging>
 
   <properties>
