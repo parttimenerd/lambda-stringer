@@ -47,9 +47,6 @@ public final class LabelFormat {
         pattern = unescape(raw);
     }
 
-    /** Returns the currently active pattern. */
-    public static String getPattern() { return pattern; }
-
     /**
      * Formats a label by substituting tokens in the current pattern.
      *

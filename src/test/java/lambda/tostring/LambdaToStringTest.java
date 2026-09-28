@@ -2,11 +2,7 @@ package lambda.tostring;
 
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.Serializable;
+import java.io.*;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.*;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.junit.Assert.*;
 
@@ -326,7 +323,7 @@ public class LambdaToStringTest {
     // -----------------------------------------------------------------------
 
     @Test public void streamFilterMapCollect() {
-        List<String> result = List.of("a", "bb", "ccc").stream()
+        List<String> result = Stream.of("a", "bb", "ccc")
                 .filter(s -> s.length() > 1)
                 .map(String::toUpperCase)
                 .toList();
@@ -372,9 +369,9 @@ public class LambdaToStringTest {
         // Comparator re-declares equals(Object) from Object.
         // The proxy must use identity semantics for it, not delegate to the inner lambda.
         Comparator<String> c = String::compareTo;
-        assertTrue("proxy.equals(itself) must be true", c.equals(c));
+        assertEquals("proxy.equals(itself) must be true", c, c);
         Comparator<String> c2 = String::compareTo;
-        assertFalse("two different proxy instances must not be equal", c.equals(c2));
+        assertNotEquals("two different proxy instances must not be equal", c, c2);
     }
 
     @Test public void comparatorHashCodeIsIdentityBased() {

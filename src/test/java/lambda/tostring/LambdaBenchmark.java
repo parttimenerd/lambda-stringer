@@ -1,19 +1,20 @@
 package lambda.tostring;
 
-import java.util.function.*;
 import java.util.concurrent.Callable;
-import java.util.Comparator;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Standalone performance benchmark for the lambda-tostring agent.
- *
+ * <p>
  * Run WITHOUT agent to get baseline:
  *   java -cp target/classes:target/test-classes lambda.tostring.LambdaBenchmark
- *
+ * <p>
  * Run WITH agent to measure overhead:
  *   java -javaagent:target/lambda-tostring-1.0.jar \
  *        -cp target/classes:target/test-classes lambda.tostring.LambdaBenchmark
- *
+ * <p>
  * Output: one row per scenario with ns/op, so the two runs can be compared directly.
  */
 public class LambdaBenchmark {
@@ -21,7 +22,7 @@ public class LambdaBenchmark {
     static final int WARMUP   =  100_000;
     static final int MEASURED = 2_000_000;
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         System.out.println("lambda-tostring benchmark  (agent active = " + agentActive() + ")");
         System.out.println("warmup=" + WARMUP + "  measured=" + MEASURED);
         System.out.println();

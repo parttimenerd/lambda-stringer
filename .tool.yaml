@@ -1,0 +1,122 @@
+tag: experimental
+maven_coordinates: me.bechberger:lambda-stringer
+tagline: Java agent that gives every lambda expression a human-readable toString() at zero per-invocation cost — label computed once at class-load time, injected as a Proxy.
+tagline_short: Java agent for human-readable lambda toString() — zero per-call overhead.
+when_to_use:
+- You need to log or debug lambda expressions stored in queues, fields, or collections and the default JVM toString() (e.g. `$$Lambda/0x...@1b6d3586`) is unreadable
+- You want clean stack traces that show which lambda was executing and where it was created, without modifying source code
+- You are debugging executor pools, callback registries, Spring event listeners, or other lambda-heavy frameworks
+when_not_to_use:
+- Your lambdas implement `Serializable` — they are intentionally left unwrapped to preserve serialization round-trips
+- You are targeting JDK-internal functional chains (`andThen`, `compose`, `negate`) created by JDK classes loaded before agent installation
+- Your application is extremely latency-sensitive at the lambda invocation level (each Proxy dispatch adds ~35 ns; negligible for real work, visible in tight microbenchmarks)
+install:
+- label: Java agent (command line)
+  lang: sh
+  code: |
+    java -javaagent:lambda-stringer.jar -jar your-app.jar
+- label: Download latest jar
+  lang: sh
+  code: |
+    curl -L -o lambda-stringer.jar \
+      https://github.com/parttimenerd/lambda-stringer/releases/download/latest/lambda-stringer.jar
+- label: Maven (attach during tests)
+  lang: xml
+  code: |
+    <dependency>
+      <groupId>me.bechberger</groupId>
+      <artifactId>lambda-stringer</artifactId>
+      <version>VERSION</version>
+      <scope>test</scope>
+    </dependency>
+usage:
+- label: Basic — attach and log lambdas
+  lang: java
+  code: |
+    Runnable task = () -> processOrder(orderId);
+    log.warn("stuck task: {}", task);
+    // → stuck task: Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
+- label: Custom format
+  lang: sh
+  code: |
+    java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
+    # → com.example.OrderService#processOrder:88
+how_to:
+- title: Attach the agent at JVM startup
+  body: |
+    Download the jar and pass it as `-javaagent`:
+    ```sh
+    curl -L -o lambda-stringer.jar \
+      https://github.com/parttimenerd/lambda-stringer/releases/download/latest/lambda-stringer.jar
+    java -javaagent:lambda-stringer.jar -jar your-app.jar
+    ```
+    No source changes required. Every lambda's `toString()` now returns a human-readable label.
+
+- title: Use with Maven Surefire (test-scoped)
+  body: |
+    Add the dependency and configure Surefire to attach it during tests:
+    ```xml
+    <dependency>
+      <groupId>me.bechberger</groupId>
+      <artifactId>lambda-stringer</artifactId>
+      <version>VERSION</version>
+      <scope>test</scope>
+    </dependency>
+
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-surefire-plugin</artifactId>
+      <configuration>
+        <argLine>-javaagent:${settings.localRepository}/me/bechberger/lambda-stringer/VERSION/lambda-stringer-VERSION.jar</argLine>
+      </configuration>
+    </plugin>
+    ```
+
+- title: Customize the label format
+  body: |
+    Pass a `format=` argument to the agent, or set a system property before agent loads.
+
+    Available tokens:
+
+    | Token | Meaning                              | Example           |
+    |-------|--------------------------------------|-------------------|
+    | `%i`  | functional interface simple name     | `Runnable`        |
+    | `%c`  | enclosing class fully-qualified name | `com.example.Foo` |
+    | `%s`  | enclosing class simple name          | `Foo`             |
+    | `%m`  | enclosing method name                | `bar`             |
+    | `%f`  | source file name                     | `Foo.java`        |
+    | `%l`  | line number (`?` if unavailable)     | `42`              |
+    | `%%`  | literal `%`                          | `%`               |
+
+    ```sh
+    # Compact format for log parsers
+    java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
+    # → com.example.Scheduler#buildTask:42
+
+    # Via system property
+    java -Dlambda.tostring.format="%s::%m:%l" -javaagent:lambda-stringer.jar ...
+    # → Scheduler::buildTask:42
+    ```
+
+- title: Read clean stack traces
+  body: |
+    Agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped automatically.
+    A `// ^ via Lambda[…]` annotation is injected after the executor frame so you can see both
+    who called the lambda and where it was defined:
+    ```
+    java.lang.RuntimeException: task failed
+        at com.example.OrderService.lambda$process$2(OrderService.java:91)
+        at com.example.Registry.runAll(Registry.java:12)
+        at // ^ via Lambda[Runnable @ OrderService.setup(OrderService.java:88)]
+        at com.example.App.main(App.java:20)
+    ```
+
+- title: Attach dynamically without restarting the JVM
+  body: |
+    Use `agentmain` via the Attach API:
+    ```java
+    VirtualMachine vm = VirtualMachine.attach(pid);
+    vm.loadAgent("/path/to/lambda-stringer.jar");
+    vm.detach();
+    ```
+    Lambdas in classes loaded after attach will get labels. Already-loaded classes are not retroactively instrumented.
