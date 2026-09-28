@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/parttimenerd/lambda-stringer/actions/workflows/ci.yml/badge.svg)](https://github.com/parttimenerd/lambda-stringer/actions/workflows/ci.yml)
 
-A Java agent that gives every lambda expression a human-readable `toString()` at no cost to your source code.
+A Java agent that gives every lambda and method reference a human-readable `toString()` — no source changes required.
 
 Without the agent:
 ```
@@ -14,9 +14,55 @@ With the agent:
 Lambda[Runnable @ com.example.Foo.bar(Foo.java:42)]
 ```
 
-## Where it helps
+## Install
 
-**Logging queues and collections of lambdas:**
+Download the latest release:
+
+```sh
+curl -L -o lambda-stringer.jar \
+  https://github.com/parttimenerd/lambda-stringer/releases/download/latest/lambda-stringer.jar
+```
+
+Then attach it at startup:
+
+```sh
+java -javaagent:lambda-stringer.jar -jar your-app.jar
+```
+
+### Maven (attach during tests)
+
+```xml
+<dependency>
+  <groupId>me.bechberger</groupId>
+  <artifactId>lambda-stringer</artifactId>
+  <version>0.2</version>
+  <scope>test</scope>
+</dependency>
+```
+
+Configure Surefire to attach the agent:
+
+```xml
+<plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <configuration>
+    <argLine>
+      -javaagent:${settings.localRepository}/me/bechberger/lambda-stringer/0.2/lambda-stringer-0.2.jar
+    </argLine>
+  </configuration>
+</plugin>
+```
+
+## What it does
+
+**Log lambdas stored in queues, fields, or collections:**
+
+```java
+log.warn("stuck task: {}", runningTask);
+// → stuck task: Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
+```
+
 ```
 === Pending tasks ===
   Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
@@ -24,13 +70,7 @@ Lambda[Runnable @ com.example.Foo.bar(Foo.java:42)]
   Lambda[Runnable @ CacheService.evict(CacheService.java:117)]
 ```
 
-**Debugging which lambda is stored in a field or passed as a callback:**
-```java
-log.debug("retry action: {}", retryAction);
-// → retry action: Lambda[Runnable @ PaymentHandler.retryCharge(PaymentHandler.java:63)]
-```
-
-**Stack traces** — agent frames are stripped and a `// ^ via` annotation is injected after the executor frame, telling you both the interface type and where the lambda was created:
+**Read clean stack traces** — agent frames are stripped; a `// ^ via` annotation is injected after the executor frame showing the interface type and the lambda's creation site:
 
 ```
 java.lang.RuntimeException: task failed
@@ -40,9 +80,7 @@ java.lang.RuntimeException: task failed
     at com.example.App.main(App.java:20)
 ```
 
-The `^` points at the executor frame (who called the lambda). The annotation gives the interface type and the exact creation site — both are clickable in IDEs.
-
-For method references, where no lambda body frame appears, this is especially useful:
+For method references, where no lambda body frame appears, this annotation is especially useful:
 
 ```
 java.lang.NumberFormatException: For input string: "abc"
@@ -52,127 +90,37 @@ java.lang.NumberFormatException: For input string: "abc"
     at com.example.MyService.configure(MyService.java:35)
 ```
 
-**Thread dumps** — the original lambda class name still appears (no regression):
-```
-"worker-thread" WAITING
-    at ...
-    at com.example.App.lambda$main$0(App.java:17)
-    at com.example.App$$Lambda/0x...run(Unknown Source)
-```
-
-## Use cases
-
-### Executor / thread-pool debugging
+**Assert on lambda identity in tests:**
 
 ```java
-ExecutorService pool = Executors.newFixedThreadPool(4);
-List<Runnable> tasks = List.of(
-    () -> processOrder(orderId),
-    () -> sendNotification(userId),
-    () -> evictCache(key)
-);
-tasks.forEach(pool::submit);
-
-// If a task hangs, log it to see exactly which lambda is stuck:
-log.warn("long-running task: {}", runningTask);
-// → long-running task: Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
-```
-
-### Callback registries
-
-```java
-// Before the agent: impossible to tell which handler is registered
-eventBus.register("payment.failed", handler);
-log.info("registered handler: {}", handler);
-// → registered handler: Lambda[Consumer @ PaymentService.onFailure(PaymentService.java:55)]
-```
-
-### Spring Boot / dependency injection
-
-Attach the agent to your Spring Boot application — no code changes required:
-
-```sh
-java -javaagent:lambda-stringer.jar -jar my-app.jar
-```
-
-Spring's `@EventListener`, `@Scheduled`, and `ApplicationListener` lambdas will all have readable labels in logs and thread dumps.
-
-### Testing and assertions
-
-```java
-// Assert that the exact lambda you expect is registered
 String label = registry.getHandler().toString();
-assertTrue("expected payment handler", label.contains("PaymentService.onFailure"));
+assertTrue(label.contains("PaymentService.onFailure"));
 ```
 
-### Structured logging (e.g. SLF4J / Logback)
+**Embed labels in structured logs:**
 
-The label embeds cleanly into JSON logs:
 ```java
-log.atDebug()
-   .addKeyValue("task", task.toString())
-   .log("submitting");
+log.atDebug().addKeyValue("task", task.toString()).log("submitting");
 // → {"level":"DEBUG","task":"Lambda[Runnable @ Scheduler.buildTask(Scheduler.java:42)]",...}
-```
-
-### Custom format for log parsers
-
-```sh
-# Compact format for log ingestion pipelines
-java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar my-app.jar
-# → com.example.Scheduler#buildTask:42
-```
-
-## Requirements
-
-Java 25+
-
-## Build
-
-```sh
-git clone https://github.com/parttimenerd/lambda-stringer
-cd lambda-stringer
-mvn package -DskipTests    # builds target/lambda-stringer.jar
-mvn package                # build + run all tests
-```
-
-Or with Make:
-```sh
-make                 # build
-make test            # build + test
-make bench           # benchmark WITH agent
-make bench-baseline  # benchmark WITHOUT agent (for comparison)
-```
-
-## Use
-
-Attach the agent to any Java 25+ application — no source changes required:
-
-```sh
-java -javaagent:target/lambda-stringer.jar -jar your-app.jar
-```
-
-Every lambda's `toString()` now returns a label like:
-```
-Lambda[Supplier @ com.example.MyService.buildFactory(MyService.java:87)]
 ```
 
 ## Custom format
 
-The label format is configurable. Pass a `format=` argument to the agent:
+Pass a `format=` argument to the agent:
 
 ```sh
-java -javaagent:target/lambda-stringer.jar=format=%i@%c#%m:%l -jar your-app.jar
-# → Supplier@com.example.MyService#buildFactory:87
+java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
+# → com.example.Scheduler#buildTask:42
 ```
 
 Or set a system property before the agent loads:
+
 ```sh
-java -Dlambda.tostring.format="%s::%m:%l" -javaagent:target/lambda-stringer.jar ...
-# → MyService::buildFactory:87
+java -Dlambda.tostring.format="%s::%m:%l" -javaagent:lambda-stringer.jar ...
+# → Scheduler::buildTask:42
 ```
 
-### Available tokens
+### Format tokens
 
 | Token | Meaning                              | Example           |
 |-------|--------------------------------------|-------------------|
@@ -184,52 +132,44 @@ java -Dlambda.tostring.format="%s::%m:%l" -javaagent:target/lambda-stringer.jar 
 | `%l`  | line number (`?` if unavailable)     | `42`              |
 | `%%`  | literal `%`                          | `%`               |
 
-Default pattern: `Lambda[%i @ %c.%m(%f:%l)]`
+Default: `Lambda[%i @ %c.%m(%f:%l)]`
 
 ## Performance
 
-The label is computed **once per call site** at class-load time (bootstrap), not on every invocation. After the bootstrap, `toString()` is a single field read — O(1) and allocation-free.
-
-Typical overhead measured with the built-in benchmark (`make bench` vs `make bench-baseline`):
+Labels are computed **once per call site** at class-load time — `toString()` is then a single field read.
 
 | Scenario                    | Without agent | With agent                            |
 |-----------------------------|---------------|---------------------------------------|
 | Create non-capturing lambda | ~2 ns         | ~2 ns (singleton cached at bootstrap) |
 | Invoke pre-created lambda   | ~1 ns         | ~35 ns (Proxy dispatch)               |
-| `toString()` on lambda      | ~4 ns         | ~4 ns (field read, unchanged)         |
+| `toString()` on lambda      | ~4 ns         | ~4 ns (field read)                    |
 
-_Numbers from an M-series Mac; results vary by JVM and hardware._
+_M-series Mac; results vary by JVM and hardware. Run `make bench` and `make bench-baseline` to measure on your hardware._
 
-Non-capturing lambdas are wrapped **once at class-load time** — the Proxy is a singleton just like the original, so repeated accesses to the same call site pay no allocation cost. The Proxy dispatch overhead on each `invoke()` call (~34 ns extra) is negligible for any workload where lambdas do real work. The main cost is visible only in tight micro-benchmarks that invoke a trivial lambda millions of times.
+The ~35 ns Proxy dispatch overhead per invocation is negligible for any real workload. It shows up only in tight microbenchmarks that invoke a trivial lambda millions of times.
 
 ## How it works
 
-Lambda classes are *hidden classes* (since Java 15): they are never passed to a
-`ClassFileTransformer`, so they cannot be instrumented directly.
+Lambda classes are *hidden classes* (Java 15+) and are never passed to a `ClassFileTransformer`, so they cannot be instrumented directly.
 
-Instead, the agent rewrites `invokedynamic` bootstrap references in *caller* classes
-at load time, redirecting `LambdaMetafactory` → `WrappingMetafactory`. The wrapper
-intercepts each call site and chains the real lambda through a `java.lang.reflect.Proxy`
-that overrides `toString()` with a label computed once at bootstrap time from the
-enclosing class, method, source file, and line number (via `StackWalker`).
-
-`Serializable` lambdas are left unwrapped to preserve serialization round-trips.
+Instead, the agent rewrites `invokedynamic` bootstrap references in *caller* classes at load time, redirecting `LambdaMetafactory` → `WrappingMetafactory`. The wrapper chains the real lambda through a `java.lang.reflect.Proxy` that overrides `toString()` with a label computed once at bootstrap time from the enclosing class, method, source file, and line number (via `StackWalker`). `Serializable` lambdas are left unwrapped to preserve serialization round-trips.
 
 ## Limitations
 
 - **Java 25+ required** — uses `java.lang.classfile` (GA in Java 24) and `StackWalker`
 - **`Serializable` lambdas** — not wrapped; they report the default JVM `toString()`
 - **Classes loaded before agent installation** — lambdas in those classes are not instrumented
-- **JDK-internal lambdas** — lambdas created by `java/util/function/` default methods
-  (`andThen`, `compose`, `negate`, `reversed`, etc.) come from JDK classes that are
-  loaded before the agent runs and cannot be instrumented; `chain.toString()` will return
-  the default JVM representation
-- **Undeclared checked exceptions** — `java.lang.reflect.Proxy` wraps any checked
-  exception not declared by the interface method in `UndeclaredThrowableException`;
-  the original exception is always accessible via `getCause()`
-- **Stack traces** — agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped;
-  a `// ^ via Lambda[…]` annotation is injected after the executor frame
-  so you can see both who called the lambda and where it was defined
+- **JDK-internal lambdas** — lambdas created by `java/util/function/` default methods (`andThen`, `compose`, `negate`, `reversed`, etc.) are from JDK classes loaded before the agent; their `toString()` returns the default JVM representation
+- **Undeclared checked exceptions** — `Proxy` wraps undeclared checked exceptions in `UndeclaredThrowableException`; the original is always in `getCause()`
+
+## Build from source
+
+```sh
+git clone https://github.com/parttimenerd/lambda-stringer
+cd lambda-stringer
+mvn package -DskipTests    # builds target/lambda-stringer.jar
+mvn package                # build + run all tests
+```
 
 ## License
 
