@@ -1,5 +1,6 @@
-tag: experimental
+tag: ready
 maven_coordinates: me.bechberger:lambda-stringer
+static_version: "0.2"
 tagline: Java agent that gives every lambda expression a human-readable toString() at zero per-invocation cost — label computed once at class-load time, injected as a Proxy.
 tagline_short: Java agent for human-readable lambda toString() — zero per-call overhead.
 when_to_use:
