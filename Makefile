@@ -10,7 +10,7 @@ $(JAR): pom.xml $(shell find src/main -name '*.java')
 	mvn package -q -DskipTests
 
 test: $(JAR)
-	mvn test -q
+	mvn package -q
 
 # Run benchmark WITH the agent (shows actual overhead)
 bench: $(JAR)

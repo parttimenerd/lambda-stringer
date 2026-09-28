@@ -13,6 +13,7 @@
     <maven.compiler.source>25</maven.compiler.source>
     <maven.compiler.target>25</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <agent.jar>${project.build.directory}/${project.artifactId}-${project.version}.jar</agent.jar>
   </properties>
 
   <dependencies>
@@ -26,6 +27,34 @@
 
   <build>
     <plugins>
+      <!--
+        Build an unshaded agent jar early (process-classes phase, before tests) so
+        Surefire can reference it via -javaagent. maven-shade-plugin replaces it
+        with the full fat jar at package time.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>pre-test-agent-jar</id>
+            <phase>process-classes</phase>
+            <goals><goal>run</goal></goals>
+            <configuration>
+              <target>
+                <jar destfile="${agent.jar}" basedir="${project.build.outputDirectory}">
+                  <manifest>
+                    <attribute name="Premain-Class" value="lambda.tostring.LambdaToStringAgent"/>
+                    <attribute name="Can-Retransform-Classes" value="false"/>
+                  </manifest>
+                </jar>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
@@ -48,14 +77,16 @@
           </execution>
         </executions>
       </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
         <configuration>
-          <argLine>-javaagent:${project.build.directory}/${project.artifactId}-${project.version}.jar</argLine>
+          <argLine>-javaagent:${agent.jar} --enable-preview</argLine>
         </configuration>
       </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
