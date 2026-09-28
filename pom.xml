@@ -83,7 +83,7 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
         <configuration>
-          <argLine>-javaagent:${agent.jar} --enable-preview</argLine>
+          <argLine>-javaagent:${agent.jar}</argLine>
         </configuration>
       </plugin>
 
@@ -92,9 +92,6 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
-          <compilerArgs>
-            <arg>--enable-preview</arg>
-          </compilerArgs>
           <release>25</release>
         </configuration>
       </plugin>
