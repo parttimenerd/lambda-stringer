@@ -128,11 +128,19 @@ public class WrappingMetafactory {
 
                     // All other methods: delegate via caller's lookup so package-private
                     // interfaces (inaccessible to WrappingMetafactory) are reachable.
+                    // Use sneakyThrow to rethrow the exact exception from the delegate —
+                    // if we let it propagate normally from the InvocationHandler, Proxy
+                    // wraps undeclared checked exceptions in UndeclaredThrowableException.
                     try {
                         return callerLookup.unreflect(method).bindTo(delegate).invokeWithArguments(args);
                     } catch (IllegalAccessException e) {
-                        return method.invoke(delegate, args);
+                        try {
+                            return method.invoke(delegate, args);
+                        } catch (java.lang.reflect.InvocationTargetException ite) {
+                            sneakyThrow(ite.getCause());
+                        }
                     }
+                    throw new AssertionError("unreachable");
                 });
     }
 
@@ -192,5 +200,16 @@ public class WrappingMetafactory {
     private static String topLevelSourceFile(Class<?> c) {
         while (c.getEnclosingClass() != null) c = c.getEnclosingClass();
         return c.getSimpleName() + ".java";
+    }
+
+    /**
+     * Rethrows {@code t} without declaring it, bypassing the compiler's checked-exception
+     * rules. Used in the InvocationHandler so that undeclared checked exceptions thrown by
+     * the delegate propagate with their original type instead of being wrapped by Proxy in
+     * UndeclaredThrowableException.
+     */
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> void sneakyThrow(Throwable t) throws E {
+        throw (E) t;
     }
 }

@@ -32,17 +32,19 @@ public final class LabelFormat {
     /**
      * Called by {@link LambdaToStringAgent} with the raw agent argument string.
      * Recognises {@code format=<pattern>} (supports {@code \\n} / {@code \\t} escapes).
-     * Other key=value pairs are silently ignored.
+     * The {@code format} value extends to end-of-string so it may contain commas.
+     * Other key=value pairs before {@code format=} are silently ignored.
      */
     static void configure(String agentArgs) {
         if (agentArgs == null || agentArgs.isEmpty()) return;
-        for (String part : agentArgs.split(",")) {
-            if (part.startsWith("format=")) {
-                String raw = part.substring("format=".length());
-                pattern = unescape(raw);
-                return;
-            }
-        }
+        // Search for "format=" key.  Everything after it (to end of string) is the pattern,
+        // so comma-containing patterns like "Lambda[%i,%c]" work correctly.
+        int idx = agentArgs.indexOf("format=");
+        if (idx < 0) return;
+        // Verify it is either at position 0 or preceded by a comma (key boundary)
+        if (idx > 0 && agentArgs.charAt(idx - 1) != ',') return;
+        String raw = agentArgs.substring(idx + "format=".length());
+        pattern = unescape(raw);
     }
 
     /** Returns the currently active pattern. */

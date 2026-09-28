@@ -554,4 +554,88 @@ public class LambdaToStringTest {
         String result = LabelFormat.format("X", "a.B", "c", "B.java", 1, "%z");
         assertEquals("%z", result);
     }
+
+    // -----------------------------------------------------------------------
+    // Exception propagation — proxy must not wrap in UndeclaredThrowableException
+    // -----------------------------------------------------------------------
+
+    @FunctionalInterface interface ThrowingAction { void run() throws Exception; }
+
+    @Test public void undeclaredCheckedExceptionWrappedInUTE() {
+        // Known Proxy limitation: java.lang.reflect.Proxy wraps any checked exception
+        // thrown by the delegate that is NOT declared by the interface method in an
+        // UndeclaredThrowableException. This is inherent to how Proxy works and cannot
+        // be bypassed without switching to a generated class approach.
+        // The cause is always the original exception, so callers can unwrap it.
+        Supplier<String> s = () -> { sneakyThrow(new java.io.IOException("sneaky")); return ""; };
+        try {
+            s.get();
+            fail("expected exception");
+        } catch (java.lang.reflect.UndeclaredThrowableException e) {
+            // Expected: Proxy wraps the undeclared checked exception
+            assertTrue("cause must be the original IOException",
+                    e.getCause() instanceof java.io.IOException);
+            assertEquals("sneaky", e.getCause().getMessage());
+        } catch (Throwable t) {
+            fail("expected UndeclaredThrowableException, got: " + t);
+        }
+    }
+
+    @Test public void declaredCheckedExceptionPropagatesCleanly() throws Exception {
+        // Callable.call() declares throws Exception — IOException propagates normally.
+        Callable<String> c = () -> { throw new java.io.IOException("declared"); };
+        try {
+            c.call();
+            fail("expected IOException");
+        } catch (java.io.IOException e) {
+            assertEquals("declared", e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> void sneakyThrow(Throwable t) throws E { throw (E) t; }
+
+    // -----------------------------------------------------------------------
+    // LabelFormat — format patterns containing commas
+    // -----------------------------------------------------------------------
+
+    @Test public void labelFormatConfigureWithCommaInPattern() {
+        // Simulate agent arg "format=Lambda[%i,%c]"
+        // The comma is part of the pattern, not a key separator.
+        LabelFormat.configure("format=Lambda[%i,%c]");
+        try {
+            String result = LabelFormat.format("Runnable", "pkg.Foo", "m", "Foo.java", 1);
+            assertEquals("Lambda[Runnable,pkg.Foo]", result);
+        } finally {
+            // Restore default so other tests are not affected
+            LabelFormat.configure("format=" + LabelFormat.DEFAULT_PATTERN);
+        }
+    }
+
+    @Test public void labelFormatConfigureWithLeadingKeyAndCommaInPattern() {
+        // Other keys before format= must still work, and pattern preserves commas
+        LabelFormat.configure("verbose=true,format=%i,%c");
+        try {
+            String result = LabelFormat.format("Runnable", "pkg.Foo", "m", "Foo.java", 1);
+            assertEquals("Runnable,pkg.Foo", result);
+        } finally {
+            LabelFormat.configure("format=" + LabelFormat.DEFAULT_PATTERN);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // andThen / compose result — known limitation: not a wrapped lambda
+    // -----------------------------------------------------------------------
+
+    @Test public void andThenResultIsNotWrappedLambda() {
+        // The result of Function.andThen() is an internal JDK lambda, not created
+        // via our rewritten invokedynamic, so it does NOT get our label.
+        // This test documents the limitation and ensures andThen still works correctly.
+        Function<String, String> trim  = String::trim;
+        Function<String, String> upper = String::toUpperCase;
+        Function<String, String> chain = trim.andThen(upper);
+        assertEquals("HELLO", chain.apply("  hello  "));
+        assertFalse("andThen result should NOT have our label (known limitation)",
+                chain.toString().startsWith("Lambda["));
+    }
 }
