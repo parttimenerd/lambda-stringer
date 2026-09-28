@@ -37,6 +37,15 @@ usage:
     Runnable task = () -> processOrder(orderId);
     log.warn("stuck task: {}", task);
     // → stuck task: Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
+- label: Stack trace annotation
+  lang: java
+  code: |
+    // Exceptions thrown through a lambda get a creation-site annotation automatically:
+    java.lang.RuntimeException: task failed
+        at OrderService.lambda$process$0(OrderService.java:91)
+        at Registry.runAll(Registry.java:12)
+        at // ^ via Lambda[Runnable @ OrderService.setup(OrderService.java:88)]
+        at App.main(App.java:20)
 - label: Custom format
   lang: sh
   code: |
