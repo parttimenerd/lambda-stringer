@@ -253,6 +253,31 @@ public class LambdaToStringTest {
                 s.toString(), s.toString());
     }
 
+    @Test public void nonCapturingLambdaIdentityPreserved() {
+        // Non-capturing lambdas from the same call site must return the same instance
+        // on every invocation — the JVM caches them as singletons, and the agent must
+        // preserve that guarantee (it wraps the singleton once at class-load time).
+        Runnable first  = getNonCapturing();
+        Runnable second = getNonCapturing();
+        assertSame("repeated calls to the same non-capturing lambda site must return the same instance",
+                first, second);
+    }
+
+    private static Runnable getNonCapturing() { return () -> {}; }
+
+    @Test public void nonCapturingLambdaLabelCorrect() {
+        Runnable r = () -> {};
+        assertLabel(r.toString());
+        assertTrue("label must contain enclosing method name",
+                r.toString().contains("nonCapturingLambdaLabelCorrect"));
+    }
+
+    @Test public void labelContainsEnclosingMethodName() {
+        Runnable r = () -> {};
+        assertTrue("label must contain enclosing method name, got: " + r,
+                r.toString().contains("labelContainsEnclosingMethodName"));
+    }
+
     // -----------------------------------------------------------------------
     // Anonymous class — must NOT be instrumented
     // -----------------------------------------------------------------------

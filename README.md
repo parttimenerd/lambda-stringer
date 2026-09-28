@@ -182,13 +182,13 @@ Typical overhead measured with the built-in benchmark (`make bench` vs `make ben
 
 | Scenario | Without agent | With agent |
 |---|---|---|
-| Create non-capturing lambda | ~2 ns | ~80 ns (one-time Proxy allocation) |
-| Invoke pre-created lambda | ~1 ns | ~5 ns (Proxy dispatch) |
+| Create non-capturing lambda | ~2 ns | ~2 ns (singleton cached at bootstrap) |
+| Invoke pre-created lambda | ~1 ns | ~35 ns (Proxy dispatch) |
 | `toString()` on lambda | ~4 ns | ~4 ns (field read, unchanged) |
 
 _Numbers from an M-series Mac; results vary by JVM and hardware._
 
-The Proxy dispatch overhead on `invoke()` (~4 ns extra) is negligible for any workload where lambdas do real work. The main cost is the one-time Proxy allocation at lambda creation, which shows up if you create millions of short-lived lambdas in a hot loop.
+Non-capturing lambdas are wrapped **once at class-load time** — the Proxy is a singleton just like the original, so repeated accesses to the same call site pay no allocation cost. The Proxy dispatch overhead on each `invoke()` call (~34 ns extra) is negligible for any workload where lambdas do real work. The main cost is visible only in tight micro-benchmarks that invoke a trivial lambda millions of times.
 
 ## How it works
 

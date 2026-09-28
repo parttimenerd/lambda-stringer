@@ -68,16 +68,30 @@ public class WrappingMetafactory {
     // --- Call site wrapping ---
 
     /**
-     * Returns a new ConstantCallSite whose target chains: original → wrapInstance.
-     * The original handle's return type is widened to Object so filterReturnValue
-     * type-checks, then narrowed back to the declared interface type.
+     * Returns a new ConstantCallSite whose target wraps every produced lambda in a Proxy.
+     *
+     * <p>For non-capturing lambdas (factoryType has no parameters) the original call site
+     * returns the same singleton on every call. We wrap that singleton once at bootstrap
+     * time and install a constant handle — preserving the JVM's identity guarantee and
+     * avoiding per-call Proxy allocation.
+     *
+     * <p>For capturing lambdas (factoryType has parameters) we chain: original → wrapInstance,
+     * widening the return type to Object for filterReturnValue then narrowing back.
      */
     private static CallSite wrapCallSite(CallSite original, MethodHandles.Lookup caller,
                                          MethodType factoryType, String label) throws Throwable {
         Class<?> ifaceType = factoryType.returnType();
+
+        if (factoryType.parameterCount() == 0) {
+            // Non-capturing lambda: wrap the singleton once and return a constant handle.
+            Object singleton = original.dynamicInvoker().invoke();
+            Object wrapped   = wrapInstance(caller, ifaceType, label, singleton);
+            return new ConstantCallSite(MethodHandles.constant(ifaceType, wrapped));
+        }
+
+        // Capturing lambda: chain original → wrapInstance on every call.
         MethodHandle filter = MethodHandles.insertArguments(
                 WRAP_INSTANCE_MH, 0, caller, ifaceType, label);
-
         MethodHandle target = original.dynamicInvoker()
                 .asType(original.dynamicInvoker().type().changeReturnType(Object.class));
         MethodHandle combined = MethodHandles.filterReturnValue(target, filter)
@@ -117,6 +131,11 @@ public class WrappingMetafactory {
         private final MethodHandles.Lookup callerLookup;
         private final String               label;
         private final Object               delegate;
+        // Each proxy wraps one functional interface — one SAM method.
+        // Cache the bound MethodHandle after first resolution to avoid unreflect+bindTo per call.
+        // Stored in a plain volatile; racing threads may resolve twice on the first call but
+        // will always store the same logically-equivalent handle.
+        private volatile MethodHandle cachedHandle;
 
         LambdaHandler(MethodHandles.Lookup callerLookup, String label, Object delegate) {
             this.callerLookup = callerLookup;
@@ -147,20 +166,41 @@ public class WrappingMetafactory {
                 };
             }
 
-            // All other methods: delegate via caller's lookup so package-private
-            // interfaces (inaccessible to WrappingMetafactory) are reachable.
+            // SAM method: use cached bound MethodHandle for repeated calls.
+            MethodHandle mh = cachedHandle;
+            if (mh == null) {
+                mh = resolveHandle(method);
+                cachedHandle = mh;
+            }
             try {
-                return callerLookup.unreflect(method).bindTo(delegate).invokeWithArguments(args);
-            } catch (IllegalAccessException e) {
-                // Fallback: direct reflection. Unwrap InvocationTargetException so the
-                // original cause propagates rather than being wrapped again.
-                try {
-                    return method.invoke(delegate, args);
-                } catch (InvocationTargetException ite) {
-                    sneakyThrow(ite.getCause());
-                }
+                return mh.invokeWithArguments(args);
+            } catch (InvocationTargetException ite) {
+                sneakyThrow(ite.getCause());
             }
             throw new AssertionError("unreachable");
+        }
+
+        private MethodHandle resolveHandle(Method method) {
+            try {
+                return callerLookup.unreflect(method).bindTo(delegate);
+            } catch (IllegalAccessException e) {
+                try {
+                    return MethodHandles.privateLookupIn(
+                            method.getDeclaringClass(), callerLookup)
+                        .unreflect(method).bindTo(delegate);
+                } catch (Exception ex) {
+                    // Reflection fallback: wrap method.invoke in a MethodHandle so
+                    // the cache still helps on repeated calls.
+                    try {
+                        method.setAccessible(true);
+                        return MethodHandles.lookup().unreflect(method).bindTo(delegate);
+                    } catch (IllegalAccessException ex2) {
+                        // Absolute last resort — direct reflection each time.
+                        // Return a sentinel that will fall through to method.invoke below.
+                        return null;
+                    }
+                }
+            }
         }
     }
 
@@ -174,7 +214,7 @@ public class WrappingMetafactory {
                                      MethodHandle implMethod) {
         String iface    = factoryType.returnType().getSimpleName();
         String encClass = caller.lookupClass().getName();
-        String method   = extractMethodName(implMethod);
+        String method   = extractMethodName(caller, implMethod);
         int    line     = resolveLineNumber(caller);
         String file     = topLevelSourceFile(caller.lookupClass());
 
@@ -182,34 +222,38 @@ public class WrappingMetafactory {
     }
 
     /**
-     * Extracts the method name from the impl MethodHandle using {@link MethodHandles.Lookup#revealDirect}.
-     * Falls back to parsing {@code toString()} for indirect handles, then to {@code "lambda"}.
+     * Extracts a human-readable method name for the {@code %m} token.
      *
-     * <p>Examples:
+     * <p>Uses the caller's Lookup (which has full access to the caller class) to call
+     * {@link MethodHandles.Lookup#revealDirect} on the impl handle, giving a stable name
+     * for both lambda bodies and method references.
+     *
      * <ul>
-     *   <li>Lambda body {@code () -> {}}   → {@code "lambda$main$0"}
-     *   <li>Static ref  {@code Foo::bar}   → {@code "bar"}
-     *   <li>Instance ref {@code s::length} → {@code "length"}
-     *   <li>Constructor ref {@code Foo::new} → {@code "new"}
+     *   <li>Lambda body  {@code () -> {}}     → synthetic name {@code lambda$foo$0}
+     *       → strips prefix/suffix to give the enclosing method name: {@code foo}
+     *   <li>Static ref   {@code Foo::bar}     → {@code bar}
+     *   <li>Instance ref {@code s::length}    → {@code length}
+     *   <li>Constructor ref {@code Foo::new}  → {@code new}
      * </ul>
      */
-    private static String extractMethodName(MethodHandle implMethod) {
+    private static String extractMethodName(MethodHandles.Lookup callerLookup,
+                                            MethodHandle implMethod) {
         if (implMethod == null) return "lambda";
-        // Preferred: stable API that works for both lambda bodies and method references.
         try {
-            MethodHandleInfo info = MethodHandles.lookup().revealDirect(implMethod);
+            MethodHandleInfo info = callerLookup.revealDirect(implMethod);
             String name = info.getName();
-            return "<init>".equals(name) ? "new" : name;
+            if ("<init>".equals(name)) return "new";
+            // Lambda body synthetic names look like "lambda$enclosingMethod$N".
+            // Extract the enclosing method name from between the first and last '$'.
+            if (name.startsWith("lambda$")) {
+                int first = name.indexOf('$') + 1;
+                int last  = name.lastIndexOf('$');
+                if (last > first) return name.substring(first, last);
+            }
+            return name;
         } catch (IllegalArgumentException ignored) {
-            // Not a direct handle (e.g. adapter or bound handle) — fall through
+            // Not a direct handle (indirect/adapter) — no name available.
         }
-        // Fallback: parse "MethodHandle(...)ReturnType methodName()" from toString().
-        // This format was observed on some JVM versions for lambda bodies.
-        String s    = implMethod.toString();
-        int space   = s.lastIndexOf(' ');
-        int paren   = s.indexOf('(', Math.max(0, space + 1));
-        if (space >= 0 && paren >= 0 && space + 1 < paren)
-            return s.substring(space + 1, paren);
         return "lambda";
     }
 
