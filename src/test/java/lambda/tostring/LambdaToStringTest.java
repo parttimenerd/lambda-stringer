@@ -673,6 +673,32 @@ public class LambdaToStringTest {
         }
     }
 
+    @Test public void exceptionCauseChainHasNoAgentFrames() {
+        // Agent frames must be stripped from cause/suppressed exceptions too.
+        RuntimeException cause = new RuntimeException("cause");
+        Runnable r = () -> {
+            RuntimeException wrapper = new RuntimeException("wrapper", cause);
+            RuntimeException suppressed = new RuntimeException("suppressed");
+            wrapper.addSuppressed(suppressed);
+            throw wrapper;
+        };
+        try {
+            r.run();
+            fail("should have thrown");
+        } catch (RuntimeException e) {
+            for (Throwable t : new Throwable[]{ e, e.getCause(), e.getSuppressed()[0] }) {
+                for (StackTraceElement frame : t.getStackTrace()) {
+                    String cls = frame.getClassName();
+                    assertFalse("agent frame in cause/suppressed: " + frame,
+                            cls.startsWith("lambda.tostring.") || cls.startsWith("jdk.proxy")
+                            || cls.contains("$Proxy")
+                            || (cls.equals("java.lang.invoke.MethodHandle")
+                                && "invokeWithArguments".equals(frame.getMethodName())));
+                }
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // andThen / compose result — known limitation: not a wrapped lambda
     // -----------------------------------------------------------------------

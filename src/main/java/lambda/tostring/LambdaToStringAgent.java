@@ -5,6 +5,15 @@ import java.util.jar.JarFile;
 
 public class LambdaToStringAgent {
     public static void premain(String args, Instrumentation inst) {
+        install(args, inst);
+    }
+
+    /** Called when attached to a running JVM via VirtualMachine.attach(). */
+    public static void agentmain(String args, Instrumentation inst) {
+        install(args, inst);
+    }
+
+    private static void install(String args, Instrumentation inst) {
         LabelFormat.configure(args);
         try {
             var src = LambdaToStringAgent.class.getProtectionDomain().getCodeSource();

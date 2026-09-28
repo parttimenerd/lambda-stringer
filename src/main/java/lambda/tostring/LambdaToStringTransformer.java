@@ -81,6 +81,7 @@ public class LambdaToStringTransformer implements ClassFileTransformer {
         // Note: do NOT skip the whole package — test/user code lives there too.
         if (className.equals("lambda/tostring/LambdaToStringAgent")
                 || className.equals("lambda/tostring/LambdaToStringTransformer")
+                || className.equals("lambda/tostring/LabelFormat")
                 || className.equals("lambda/tostring/WrappingMetafactory")) return true;
         return className.startsWith("java/")
                 || className.startsWith("javax/")

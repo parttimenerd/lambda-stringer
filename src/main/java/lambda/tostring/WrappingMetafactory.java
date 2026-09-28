@@ -28,7 +28,7 @@ public class WrappingMetafactory {
             WRAP_INSTANCE_MH = MethodHandles.lookup().findStatic(
                     WrappingMetafactory.class, "wrapInstance",
                     MethodType.methodType(Object.class, MethodHandles.Lookup.class,
-                            Class.class, String.class, String.class,
+                            Class.class, String.class,
                             String.class, String.class, String.class, int.class,
                             Object.class));
         } catch (ReflectiveOperationException e) {
@@ -88,14 +88,14 @@ public class WrappingMetafactory {
             // Non-capturing lambda: wrap the singleton once and return a constant handle.
             Object singleton = original.dynamicInvoker().invoke();
             Object wrapped   = wrapInstance(caller, ifaceType,
-                    info.label, info.iface, info.encClass, info.encMethod, info.file, info.line, singleton);
+                    info.label, info.encClass, info.encMethod, info.file, info.line, singleton);
             return new ConstantCallSite(MethodHandles.constant(ifaceType, wrapped));
         }
 
         // Capturing lambda: chain original → wrapInstance on every call.
         MethodHandle filter = MethodHandles.insertArguments(
                 WRAP_INSTANCE_MH, 0, caller, ifaceType,
-                info.label, info.iface, info.encClass, info.encMethod, info.file, info.line);
+                info.label, info.encClass, info.encMethod, info.file, info.line);
         MethodHandle target = original.dynamicInvoker()
                 .asType(original.dynamicInvoker().type().changeReturnType(Object.class));
         MethodHandle combined = MethodHandles.filterReturnValue(target, filter)
@@ -111,7 +111,7 @@ public class WrappingMetafactory {
      * package-private and module-private interfaces are accessible.
      */
     static Object wrapInstance(MethodHandles.Lookup callerLookup, Class<?> ifaceType,
-                                String label, String ifaceName,
+                                String label,
                                 String creationClass, String creationMethod,
                                 String creationFile, int creationLine,
                                 Object delegate) {
@@ -124,7 +124,7 @@ public class WrappingMetafactory {
         return Proxy.newProxyInstance(
                 delegate.getClass().getClassLoader(),
                 new Class<?>[]{ ifaceType },
-                new LambdaHandler(callerLookup, label, ifaceName,
+                new LambdaHandler(callerLookup, label,
                         creationClass, creationMethod, creationFile, creationLine,
                         delegate));
     }
@@ -139,7 +139,6 @@ public class WrappingMetafactory {
 
         private final MethodHandles.Lookup callerLookup;
         private final String               label;
-        private final String               ifaceName;
         private final String               creationClass;
         private final String               creationMethod;
         private final String               creationFile;
@@ -151,13 +150,12 @@ public class WrappingMetafactory {
         // will always store the same logically-equivalent handle.
         private volatile MethodHandle cachedHandle;
 
-        LambdaHandler(MethodHandles.Lookup callerLookup, String label, String ifaceName,
+        LambdaHandler(MethodHandles.Lookup callerLookup, String label,
                       String creationClass, String creationMethod,
                       String creationFile, int creationLine,
                       Object delegate) {
             this.callerLookup   = callerLookup;
             this.label          = label;
-            this.ifaceName      = ifaceName;
             this.creationClass  = creationClass;
             this.creationMethod = creationMethod;
             this.creationFile   = creationFile;
@@ -195,7 +193,9 @@ public class WrappingMetafactory {
                 cachedHandle = mh;
             }
             try {
-                return mh.invokeWithArguments(args);
+                if (mh != null) return mh.invokeWithArguments(args);
+                // Last-resort fallback: all MethodHandle access attempts failed.
+                return method.invoke(delegate, args);
             } catch (InvocationTargetException ite) {
                 sneakyThrow(annotateAndStrip(ite.getCause()));
             } catch (Throwable t) {
@@ -205,28 +205,43 @@ public class WrappingMetafactory {
         }
 
         /**
-         * Strips agent-internal frames from {@code t}'s stack trace and injects a
-         * synthetic "via λ created in" frame immediately after the executor frame
-         * (the first non-agent frame after the last agent frame — i.e. the code
-         * that called the lambda).
+         * Strips agent-internal frames from the throwable's stack trace (and recursively
+         * from its cause chain and suppressed exceptions), then injects a synthetic
+         * {@code "// ^ via <label>"} frame after the executor frame on the outermost throwable.
          *
          * <p>The result looks like:
          * <pre>
-         *   at Integer.parseInt(Integer.java:662)                ← what ran inside the lambda
-         *   at Parser.parse(Executor.java:7)                     ← who called the lambda
-         *   at // ^ via λ created in Foo.main(Foo.java:13)       ← injected: where lambda came from
-         *   at Foo.main(Foo.java:14)                             ← broader context
+         *   at Integer.parseInt(Integer.java:662)
+         *   at Parser.parse(Parser.java:7)
+         *   at // ^ via Lambda[Function @ Foo.main(Foo.java:13)]
+         *   at Foo.main(Foo.java:14)
          * </pre>
-         *
-         * <p>Placing the annotation after the executor frame makes it easy to see both
-         * which code called the lambda (the frame above) and where the lambda was
-         * defined (the annotation itself, with a clickable file/line).
          *
          * <p>The mutation is on the throwable object itself, so the clean trace is
          * visible regardless of who prints it — caught handler, uncaught handler, logger, IDE.
          */
         private Throwable annotateAndStrip(Throwable t) {
             if (t == null) return null;
+            stripChain(t, new java.util.IdentityHashMap<>());
+            return t;
+        }
+
+        /**
+         * Recursively strips agent frames from t and all reachable causes/suppressed,
+         * using a visited set to handle cycles.
+         * The creation-site annotation is injected only on the outermost throwable (the
+         * one thrown directly out of the proxy) — causes are cleaned but not annotated,
+         * since they originate inside the lambda body and were not thrown through the proxy.
+         */
+        private void stripChain(Throwable t, java.util.IdentityHashMap<Throwable, Boolean> visited) {
+            if (t == null || visited.put(t, Boolean.TRUE) != null) return;
+            boolean isOutermost = visited.size() == 1;
+            stripOne(t, isOutermost);
+            stripChain(t.getCause(), visited);
+            for (Throwable s : t.getSuppressed()) stripChain(s, visited);
+        }
+
+        private void stripOne(Throwable t, boolean annotate) {
             StackTraceElement[] frames = t.getStackTrace();
 
             // Find the proxy call boundary: the last agent frame.
@@ -239,7 +254,7 @@ public class WrappingMetafactory {
 
             // insertAfter = index in original frames[] of the executor frame.
             int insertAfter = -1;
-            if (lastAgentIdx >= 0) {
+            if (annotate && lastAgentIdx >= 0) {
                 for (int i = lastAgentIdx + 1; i < frames.length; i++) {
                     if (!isAgentFrame(frames[i])) { insertAfter = i; break; }
                 }
@@ -262,7 +277,6 @@ public class WrappingMetafactory {
                 }
             }
             t.setStackTrace(result);
-            return t;
         }
 
         /**
@@ -301,8 +315,8 @@ public class WrappingMetafactory {
                     try {
                         method.setAccessible(true);
                         return MethodHandles.lookup().unreflect(method).bindTo(delegate);
-                    } catch (IllegalAccessException ex2) {
-                        return null;
+                    } catch (Exception ex2) {
+                        return null; // all attempts failed; caller falls back to Method.invoke
                     }
                 }
             }
@@ -311,19 +325,26 @@ public class WrappingMetafactory {
 
     // --- Label construction ---
 
-    /** All label components needed by both the label string and the stack-trace annotation. */
-    private record LabelInfo(String label, String iface, String encClass, String encMethod, String file, int line) {}
+    private record LabelInfo(String label, String encClass, String encMethod, String file, int line) {}
 
     private static LabelInfo buildLabelInfo(MethodHandles.Lookup caller, MethodType factoryType,
                                             MethodHandle implMethod) {
-        String iface      = factoryType.returnType().getSimpleName();
-        String encClass   = caller.lookupClass().getName();
-        String implName   = extractMethodName(caller, implMethod);
-        String encMethod  = resolveEnclosingMethod(caller);   // actual enclosing method for creation frame
-        int    line       = resolveLineNumber(caller);
-        String file       = topLevelSourceFile(caller.lookupClass());
-        String label      = LabelFormat.format(iface, encClass, implName, file, line);
-        return new LabelInfo(label, iface, encClass, encMethod, file, line);
+        String iface     = factoryType.returnType().getSimpleName();
+        String encClass  = caller.lookupClass().getName();
+        String implName  = extractMethodName(caller, implMethod);
+        String file      = topLevelSourceFile(caller.lookupClass());
+
+        // Single stack walk to capture both line number and enclosing method name.
+        record FrameInfo(String method, int line) {}
+        FrameInfo fi = STACK_WALKER.walk(frames -> frames
+                .filter(f -> f.getDeclaringClass() == caller.lookupClass())
+                .map(f -> new FrameInfo(f.getMethodName(),
+                        f.getLineNumber() > 0 ? f.getLineNumber() : -1))
+                .findFirst()
+                .orElse(new FrameInfo("lambda", -1)));
+
+        String label = LabelFormat.format(iface, encClass, implName, file, fi.line());
+        return new LabelInfo(label, encClass, fi.method(), file, fi.line());
     }
 
     /**
@@ -360,41 +381,6 @@ public class WrappingMetafactory {
             // Not a direct handle (indirect/adapter) — no name available.
         }
         return "lambda";
-    }
-
-    /**
-     * Walks the call stack to find the line number of the first frame whose declaring
-     * class matches the lambda's enclosing class.
-     * Returns -1 if unavailable.
-     */
-    private static int resolveLineNumber(MethodHandles.Lookup caller) {
-        try {
-            return STACK_WALKER.walk(frames -> frames
-                    .filter(f -> f.getDeclaringClass() == caller.lookupClass())
-                    .mapToInt(StackWalker.StackFrame::getLineNumber)
-                    .filter(n -> n > 0)
-                    .findFirst()
-                    .orElse(-1));
-        } catch (Exception e) {
-            return -1;
-        }
-    }
-
-    /**
-     * Walks the call stack to find the method name of the first frame whose declaring
-     * class matches the lambda's enclosing class (the method that contains the lambda
-     * expression or method reference).
-     */
-    private static String resolveEnclosingMethod(MethodHandles.Lookup caller) {
-        try {
-            return STACK_WALKER.walk(frames -> frames
-                    .filter(f -> f.getDeclaringClass() == caller.lookupClass())
-                    .map(StackWalker.StackFrame::getMethodName)
-                    .findFirst()
-                    .orElse("lambda"));
-        } catch (Exception e) {
-            return "lambda";
-        }
     }
 
     /** Returns the source file name for the outermost enclosing class (e.g. "Foo.java"). */

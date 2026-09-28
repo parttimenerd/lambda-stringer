@@ -46,6 +46,8 @@
                 <jar destfile="${agent.jar}" basedir="${project.build.outputDirectory}">
                   <manifest>
                     <attribute name="Premain-Class" value="lambda.tostring.LambdaToStringAgent"/>
+                    <attribute name="Agent-Class" value="lambda.tostring.LambdaToStringAgent"/>
+                    <attribute name="Can-Redefine-Classes" value="false"/>
                     <attribute name="Can-Retransform-Classes" value="false"/>
                   </manifest>
                 </jar>
@@ -69,6 +71,8 @@
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <manifestEntries>
                     <Premain-Class>lambda.tostring.LambdaToStringAgent</Premain-Class>
+                    <Agent-Class>lambda.tostring.LambdaToStringAgent</Agent-Class>
+                    <Can-Redefine-Classes>false</Can-Redefine-Classes>
                     <Can-Retransform-Classes>false</Can-Retransform-Classes>
                   </manifestEntries>
                 </transformer>
