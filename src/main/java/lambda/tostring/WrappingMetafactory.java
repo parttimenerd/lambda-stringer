@@ -29,7 +29,7 @@ public class WrappingMetafactory {
                     WrappingMetafactory.class, "wrapInstance",
                     MethodType.methodType(Object.class, MethodHandles.Lookup.class,
                             Class.class, String.class,
-                            String.class, String.class, String.class, int.class,
+                            String.class, String.class, int.class,
                             Object.class));
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
@@ -88,14 +88,14 @@ public class WrappingMetafactory {
             // Non-capturing lambda: wrap the singleton once and return a constant handle.
             Object singleton = original.dynamicInvoker().invoke();
             Object wrapped   = wrapInstance(caller, ifaceType,
-                    info.label, info.encClass, info.encMethod, info.file, info.line, singleton);
+                    info.label, info.encMethod, info.file, info.line, singleton);
             return new ConstantCallSite(MethodHandles.constant(ifaceType, wrapped));
         }
 
         // Capturing lambda: chain original → wrapInstance on every call.
         MethodHandle filter = MethodHandles.insertArguments(
                 WRAP_INSTANCE_MH, 0, caller, ifaceType,
-                info.label, info.encClass, info.encMethod, info.file, info.line);
+                info.label, info.encMethod, info.file, info.line);
         MethodHandle target = original.dynamicInvoker()
                 .asType(original.dynamicInvoker().type().changeReturnType(Object.class));
         MethodHandle combined = MethodHandles.filterReturnValue(target, filter)
@@ -112,7 +112,7 @@ public class WrappingMetafactory {
      */
     static Object wrapInstance(MethodHandles.Lookup callerLookup, Class<?> ifaceType,
                                 String label,
-                                String creationClass, String creationMethod,
+                                String creationMethod,
                                 String creationFile, int creationLine,
                                 Object delegate) {
         if (delegate == null) return null;
@@ -125,7 +125,7 @@ public class WrappingMetafactory {
                 delegate.getClass().getClassLoader(),
                 new Class<?>[]{ ifaceType },
                 new LambdaHandler(callerLookup, label,
-                        creationClass, creationMethod, creationFile, creationLine,
+                        creationMethod, creationFile, creationLine,
                         delegate));
     }
 
@@ -139,7 +139,6 @@ public class WrappingMetafactory {
 
         private final MethodHandles.Lookup callerLookup;
         private final String               label;
-        private final String               creationClass;
         private final String               creationMethod;
         private final String               creationFile;
         private final int                  creationLine;
@@ -151,12 +150,11 @@ public class WrappingMetafactory {
         private volatile MethodHandle cachedHandle;
 
         LambdaHandler(MethodHandles.Lookup callerLookup, String label,
-                      String creationClass, String creationMethod,
+                      String creationMethod,
                       String creationFile, int creationLine,
                       Object delegate) {
             this.callerLookup   = callerLookup;
             this.label          = label;
-            this.creationClass  = creationClass;
             this.creationMethod = creationMethod;
             this.creationFile   = creationFile;
             this.creationLine   = creationLine;
@@ -244,15 +242,16 @@ public class WrappingMetafactory {
         private void stripOne(Throwable t, boolean annotate) {
             StackTraceElement[] frames = t.getStackTrace();
 
-            // Find the proxy call boundary: the last agent frame.
-            // The first non-agent frame after it is the executor (the caller of the lambda).
-            // We insert the annotation AFTER that executor frame.
+            // Single pass: track last agent frame index, count kept frames.
             int lastAgentIdx = -1;
+            int keepCount    = 0;
             for (int i = 0; i < frames.length; i++) {
-                if (isAgentFrame(frames[i])) lastAgentIdx = i;
+                if (isAgentFrame(frames[i])) { lastAgentIdx = i; }
+                else                         { keepCount++;      }
             }
 
-            // insertAfter = index in original frames[] of the executor frame.
+            // First non-agent frame after the last agent frame = executor (lambda's caller).
+            // Inject the annotation AFTER that frame.
             int insertAfter = -1;
             if (annotate && lastAgentIdx >= 0) {
                 for (int i = lastAgentIdx + 1; i < frames.length; i++) {
@@ -260,10 +259,6 @@ public class WrappingMetafactory {
                 }
             }
 
-            int keepCount = 0;
-            for (StackTraceElement f : frames) {
-                if (!isAgentFrame(f)) keepCount++;
-            }
             boolean inject = insertAfter >= 0;
             StackTraceElement[] result = new StackTraceElement[keepCount + (inject ? 1 : 0)];
             int out = 0;
@@ -325,7 +320,8 @@ public class WrappingMetafactory {
 
     // --- Label construction ---
 
-    private record LabelInfo(String label, String encClass, String encMethod, String file, int line) {}
+    private record LabelInfo(String label, String encMethod, String file, int line) {}
+    private record FrameInfo(String method, int line) {}
 
     private static LabelInfo buildLabelInfo(MethodHandles.Lookup caller, MethodType factoryType,
                                             MethodHandle implMethod) {
@@ -335,16 +331,20 @@ public class WrappingMetafactory {
         String file      = topLevelSourceFile(caller.lookupClass());
 
         // Single stack walk to capture both line number and enclosing method name.
-        record FrameInfo(String method, int line) {}
-        FrameInfo fi = STACK_WALKER.walk(frames -> frames
-                .filter(f -> f.getDeclaringClass() == caller.lookupClass())
-                .map(f -> new FrameInfo(f.getMethodName(),
-                        f.getLineNumber() > 0 ? f.getLineNumber() : -1))
-                .findFirst()
-                .orElse(new FrameInfo("lambda", -1)));
+        FrameInfo fi;
+        try {
+            fi = STACK_WALKER.walk(frames -> frames
+                    .filter(f -> f.getDeclaringClass() == caller.lookupClass())
+                    .map(f -> new FrameInfo(f.getMethodName(),
+                            f.getLineNumber() > 0 ? f.getLineNumber() : -1))
+                    .findFirst()
+                    .orElse(new FrameInfo("lambda", -1)));
+        } catch (Exception e) {
+            fi = new FrameInfo("lambda", -1);
+        }
 
         String label = LabelFormat.format(iface, encClass, implName, file, fi.line());
-        return new LabelInfo(label, encClass, fi.method(), file, fi.line());
+        return new LabelInfo(label, fi.method(), file, fi.line());
     }
 
     /**

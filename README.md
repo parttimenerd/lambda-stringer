@@ -36,7 +36,7 @@ log.debug("retry action: {}", retryAction);
 java.lang.RuntimeException: task failed
     at com.example.OrderService.lambda$process$2(OrderService.java:91)
     at com.example.Registry.runAll(Registry.java:12)
-    at // ^ via Runnable λ created in OrderService.setup(OrderService.java:88)
+    at // ^ via Lambda[Runnable @ OrderService.setup(OrderService.java:88)]
     at com.example.App.main(App.java:20)
 ```
 
@@ -48,7 +48,7 @@ For method references, where no lambda body frame appears, this is especially us
 java.lang.NumberFormatException: For input string: "abc"
     at java.lang.Integer.parseInt(Integer.java:662)
     at com.example.Parser.parse(Parser.java:7)
-    at // ^ via Function λ created in MyService.configure(MyService.java:34)
+    at // ^ via Lambda[Function @ MyService.configure(MyService.java:34)]
     at com.example.MyService.configure(MyService.java:35)
 ```
 
@@ -228,7 +228,7 @@ enclosing class, method, source file, and line number (via `StackWalker`).
   exception not declared by the interface method in `UndeclaredThrowableException`;
   the original exception is always accessible via `getCause()`
 - **Stack traces** — agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped;
-  a `// ^ via InterfaceName λ created in …` annotation is injected after the executor frame
+  a `// ^ via Lambda[…]` annotation is injected after the executor frame
   so you can see both who called the lambda and where it was defined
 
 ## License
