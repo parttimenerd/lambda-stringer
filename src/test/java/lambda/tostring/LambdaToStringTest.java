@@ -537,13 +537,14 @@ public class LambdaToStringTest {
     }
 
     @Test public void exceptionStackTraceHasNoAgentFrames() {
-        // Stack trace from an exception thrown inside a lambda must look identical
-        // to the no-agent case: no lambda.tostring.*, no $Proxy*, no invokeWithArguments.
+        // Stack trace from an exception thrown inside a lambda must have no agent internals,
+        // and must contain a synthetic "λ created in" annotation frame.
         Runnable r = () -> { throw new RuntimeException("trace-test"); };
         try {
             r.run();
             fail("should have thrown");
         } catch (RuntimeException e) {
+            boolean sawCreationFrame = false;
             for (StackTraceElement frame : e.getStackTrace()) {
                 String cls = frame.getClassName();
                 assertFalse("agent frame leaked into stack trace: " + frame,
@@ -553,7 +554,10 @@ public class LambdaToStringTest {
                 assertFalse("invokeWithArguments frame leaked into stack trace: " + frame,
                         cls.equals("java.lang.invoke.MethodHandle")
                         && "invokeWithArguments".equals(frame.getMethodName()));
+                if (cls.startsWith("// λ created in")) sawCreationFrame = true;
             }
+            assertTrue("stack trace must contain a 'λ created in' annotation frame",
+                    sawCreationFrame);
         }
     }
 
