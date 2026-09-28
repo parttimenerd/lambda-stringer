@@ -137,18 +137,23 @@ public class WrappingMetafactory {
      */
     static final class LambdaHandler implements InvocationHandler {
 
+        // Interned string constants for identity comparison in the hot dispatch path.
+        private static final String TO_STRING = "toString";
+        private static final String EQUALS    = "equals";
+        private static final String HASH_CODE = "hashCode";
+
         private final String               label;
         private final String               creationMethod;
         private final String               creationFile;
         private final int                  creationLine;
         private final Object               delegate;
         // callerLookup is only needed to resolve the SAM MethodHandle on the first call.
-        // Nulled out after caching to allow the caller class to be unloaded if it goes away.
+        // Nulled out before publishing cachedHandle so that any thread seeing a non-null
+        // cachedHandle is guaranteed to also see the null lookup (store-store order).
         private volatile MethodHandles.Lookup callerLookup;
         // Each proxy wraps one functional interface — one SAM method.
-        // Cache the bound MethodHandle after first resolution to avoid unreflect+bindTo per call.
-        // Stored in a plain volatile; racing threads may resolve twice on the first call but
-        // will always store the same logically-equivalent handle.
+        // Cache the bound spreader MethodHandle after first resolution.
+        // Plain volatile: racing threads may resolve twice, but always produce the same result.
         private volatile MethodHandle cachedHandle;
 
         LambdaHandler(MethodHandles.Lookup callerLookup, String label,
@@ -165,32 +170,36 @@ public class WrappingMetafactory {
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            // Get name once; use == against interned constants — no equals() on the hot path.
+            String name = method.getName();
+
             // toString: return the pre-built label.
-            if (method.getName().equals("toString") && (args == null || args.length == 0))
+            if (name == TO_STRING && (args == null || args.length == 0))
                 return label;
 
             // Route Object-declared methods through proxy identity so that
             // proxy.equals(proxy) == true and collections work correctly.
             // Also covers interfaces that re-declare Object methods (e.g. Comparator.equals):
             // those have declaring class = interface, but we still want identity semantics.
-            String name = method.getName();
             if (method.getDeclaringClass() == Object.class
-                    || ((name.equals("equals") || name.equals("hashCode"))
+                    || ((name == EQUALS || name == HASH_CODE)
                         && args != null && args.length <= 1
                         && method.getDeclaringClass().isInterface())) {
-                return switch (name) {
-                    case "equals"   -> proxy == (args != null ? args[0] : null);
-                    case "hashCode" -> System.identityHashCode(proxy);
-                    default         -> method.invoke(delegate, args);
-                };
+                if (name == EQUALS)    return proxy == (args != null ? args[0] : null);
+                if (name == HASH_CODE) return System.identityHashCode(proxy);
+                return method.invoke(delegate, args);
             }
 
-            // SAM method: use cached bound MethodHandle for repeated calls.
+            // SAM method: use a cached spreader MethodHandle for repeated calls.
+            // The spreader accepts Object[] and invokes the bound delegate with typed args,
+            // avoiding the per-element boxing that invokeWithArguments performs internally.
             MethodHandle mh = cachedHandle;
             if (mh == null) {
                 mh = resolveHandle(method);
+                // Null the lookup before publishing the handle: any reader that observes
+                // cachedHandle != null is guaranteed to see callerLookup == null.
+                callerLookup = null;
                 cachedHandle = mh;
-                callerLookup = null; // no longer needed; release for GC
             }
             try {
                 if (mh != null) return mh.invokeWithArguments(args);
