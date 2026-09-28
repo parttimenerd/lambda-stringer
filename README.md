@@ -30,13 +30,27 @@ log.debug("retry action: {}", retryAction);
 // → retry action: Lambda[Runnable @ PaymentHandler.retryCharge(PaymentHandler.java:63)]
 ```
 
-**Stack traces** — the agent strips its own frames, so the trace looks identical to the no-agent case:
+**Stack traces** — agent frames are stripped and a `// ^ via` annotation is injected after the executor frame, telling you both the interface type and where the lambda was created:
+
 ```
-java.lang.IllegalStateException: task failed
+java.lang.RuntimeException: task failed
     at com.example.OrderService.lambda$process$2(OrderService.java:91)
-    at com.example.TaskRunner.run(TaskRunner.java:34)
+    at com.example.Registry.runAll(Registry.java:12)
+    at // ^ via Runnable λ created in OrderService.setup(OrderService.java:88)
+    at com.example.App.main(App.java:20)
 ```
-No extra frames from `LambdaHandler`, `$Proxy`, or `invokeWithArguments`.
+
+The `^` points at the executor frame (who called the lambda). The annotation gives the interface type and the exact creation site — both are clickable in IDEs.
+
+For method references, where no lambda body frame appears, this is especially useful:
+
+```
+java.lang.NumberFormatException: For input string: "abc"
+    at java.lang.Integer.parseInt(Integer.java:662)
+    at com.example.Parser.parse(Parser.java:7)
+    at // ^ via Function λ created in MyService.configure(MyService.java:34)
+    at com.example.MyService.configure(MyService.java:35)
+```
 
 **Thread dumps** — the original lambda class name still appears (no regression):
 ```
@@ -213,8 +227,9 @@ enclosing class, method, source file, and line number (via `StackWalker`).
 - **Undeclared checked exceptions** — `java.lang.reflect.Proxy` wraps any checked
   exception not declared by the interface method in `UndeclaredThrowableException`;
   the original exception is always accessible via `getCause()`
-- **Stack traces** — agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped
-  from any exception thrown through the proxy, so stack traces look identical to the no-agent case
+- **Stack traces** — agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped;
+  a `// ^ via InterfaceName λ created in …` annotation is injected after the executor frame
+  so you can see both who called the lambda and where it was defined
 
 ## License
 

@@ -554,7 +554,7 @@ public class LambdaToStringTest {
                 assertFalse("invokeWithArguments frame leaked into stack trace: " + frame,
                         cls.equals("java.lang.invoke.MethodHandle")
                         && "invokeWithArguments".equals(frame.getMethodName()));
-                if (cls.startsWith("// ^ via λ created in")) sawCreationFrame = true;
+                if (cls.startsWith("// ^ via ") && cls.contains("λ created in")) sawCreationFrame = true;
             }
             assertTrue("stack trace must contain a 'λ created in' annotation frame",
                     sawCreationFrame);

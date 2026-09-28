@@ -28,7 +28,7 @@ public class WrappingMetafactory {
             WRAP_INSTANCE_MH = MethodHandles.lookup().findStatic(
                     WrappingMetafactory.class, "wrapInstance",
                     MethodType.methodType(Object.class, MethodHandles.Lookup.class,
-                            Class.class, String.class,
+                            Class.class, String.class, String.class,
                             String.class, String.class, String.class, int.class,
                             Object.class));
         } catch (ReflectiveOperationException e) {
@@ -88,14 +88,14 @@ public class WrappingMetafactory {
             // Non-capturing lambda: wrap the singleton once and return a constant handle.
             Object singleton = original.dynamicInvoker().invoke();
             Object wrapped   = wrapInstance(caller, ifaceType,
-                    info.label, info.encClass, info.encMethod, info.file, info.line, singleton);
+                    info.label, info.iface, info.encClass, info.encMethod, info.file, info.line, singleton);
             return new ConstantCallSite(MethodHandles.constant(ifaceType, wrapped));
         }
 
         // Capturing lambda: chain original → wrapInstance on every call.
         MethodHandle filter = MethodHandles.insertArguments(
                 WRAP_INSTANCE_MH, 0, caller, ifaceType,
-                info.label, info.encClass, info.encMethod, info.file, info.line);
+                info.label, info.iface, info.encClass, info.encMethod, info.file, info.line);
         MethodHandle target = original.dynamicInvoker()
                 .asType(original.dynamicInvoker().type().changeReturnType(Object.class));
         MethodHandle combined = MethodHandles.filterReturnValue(target, filter)
@@ -111,7 +111,7 @@ public class WrappingMetafactory {
      * package-private and module-private interfaces are accessible.
      */
     static Object wrapInstance(MethodHandles.Lookup callerLookup, Class<?> ifaceType,
-                                String label,
+                                String label, String ifaceName,
                                 String creationClass, String creationMethod,
                                 String creationFile, int creationLine,
                                 Object delegate) {
@@ -124,7 +124,7 @@ public class WrappingMetafactory {
         return Proxy.newProxyInstance(
                 delegate.getClass().getClassLoader(),
                 new Class<?>[]{ ifaceType },
-                new LambdaHandler(callerLookup, label,
+                new LambdaHandler(callerLookup, label, ifaceName,
                         creationClass, creationMethod, creationFile, creationLine,
                         delegate));
     }
@@ -139,6 +139,7 @@ public class WrappingMetafactory {
 
         private final MethodHandles.Lookup callerLookup;
         private final String               label;
+        private final String               ifaceName;
         private final String               creationClass;
         private final String               creationMethod;
         private final String               creationFile;
@@ -150,12 +151,13 @@ public class WrappingMetafactory {
         // will always store the same logically-equivalent handle.
         private volatile MethodHandle cachedHandle;
 
-        LambdaHandler(MethodHandles.Lookup callerLookup, String label,
+        LambdaHandler(MethodHandles.Lookup callerLookup, String label, String ifaceName,
                       String creationClass, String creationMethod,
                       String creationFile, int creationLine,
                       Object delegate) {
             this.callerLookup   = callerLookup;
             this.label          = label;
+            this.ifaceName      = ifaceName;
             this.creationClass  = creationClass;
             this.creationMethod = creationMethod;
             this.creationFile   = creationFile;
@@ -272,7 +274,7 @@ public class WrappingMetafactory {
          */
         private StackTraceElement creationFrame() {
             return new StackTraceElement(
-                    "// ^ via λ created in " + creationClass,
+                    "// ^ via " + ifaceName + " λ created in " + creationClass,
                     creationMethod,
                     creationFile,
                     creationLine);
@@ -310,7 +312,7 @@ public class WrappingMetafactory {
     // --- Label construction ---
 
     /** All label components needed by both the label string and the stack-trace annotation. */
-    private record LabelInfo(String label, String encClass, String encMethod, String file, int line) {}
+    private record LabelInfo(String label, String iface, String encClass, String encMethod, String file, int line) {}
 
     private static LabelInfo buildLabelInfo(MethodHandles.Lookup caller, MethodType factoryType,
                                             MethodHandle implMethod) {
@@ -321,7 +323,7 @@ public class WrappingMetafactory {
         int    line       = resolveLineNumber(caller);
         String file       = topLevelSourceFile(caller.lookupClass());
         String label      = LabelFormat.format(iface, encClass, implName, file, line);
-        return new LabelInfo(label, encClass, encMethod, file, line);
+        return new LabelInfo(label, iface, encClass, encMethod, file, line);
     }
 
     /**
