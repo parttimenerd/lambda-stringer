@@ -46,11 +46,6 @@ usage:
         at Registry.runAll(Registry.java:12)
         at // ^ via Lambda[Runnable @ OrderService.setup(OrderService.java:88)]
         at App.main(App.java:20)
-- label: Custom format
-  lang: sh
-  code: |
-    java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
-    # → com.example.OrderService#processOrder:88
 how_to:
 - title: Attach the agent at JVM startup
   body: |
