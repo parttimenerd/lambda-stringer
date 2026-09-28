@@ -137,12 +137,14 @@ public class WrappingMetafactory {
      */
     static final class LambdaHandler implements InvocationHandler {
 
-        private final MethodHandles.Lookup callerLookup;
         private final String               label;
         private final String               creationMethod;
         private final String               creationFile;
         private final int                  creationLine;
         private final Object               delegate;
+        // callerLookup is only needed to resolve the SAM MethodHandle on the first call.
+        // Nulled out after caching to allow the caller class to be unloaded if it goes away.
+        private volatile MethodHandles.Lookup callerLookup;
         // Each proxy wraps one functional interface — one SAM method.
         // Cache the bound MethodHandle after first resolution to avoid unreflect+bindTo per call.
         // Stored in a plain volatile; racing threads may resolve twice on the first call but
@@ -153,12 +155,12 @@ public class WrappingMetafactory {
                       String creationMethod,
                       String creationFile, int creationLine,
                       Object delegate) {
-            this.callerLookup   = callerLookup;
             this.label          = label;
             this.creationMethod = creationMethod;
             this.creationFile   = creationFile;
             this.creationLine   = creationLine;
             this.delegate       = delegate;
+            this.callerLookup   = callerLookup;
         }
 
         @Override
@@ -177,7 +179,6 @@ public class WrappingMetafactory {
                         && args != null && args.length <= 1
                         && method.getDeclaringClass().isInterface())) {
                 return switch (name) {
-                    case "toString" -> label;
                     case "equals"   -> proxy == (args != null ? args[0] : null);
                     case "hashCode" -> System.identityHashCode(proxy);
                     default         -> method.invoke(delegate, args);
@@ -189,6 +190,7 @@ public class WrappingMetafactory {
             if (mh == null) {
                 mh = resolveHandle(method);
                 cachedHandle = mh;
+                callerLookup = null; // no longer needed; release for GC
             }
             try {
                 if (mh != null) return mh.invokeWithArguments(args);
@@ -249,6 +251,9 @@ public class WrappingMetafactory {
                 if (isAgentFrame(frames[i])) { lastAgentIdx = i; }
                 else                         { keepCount++;      }
             }
+
+            // No agent frames and no annotation needed — nothing to do.
+            if (lastAgentIdx < 0 && !annotate) return;
 
             // First non-agent frame after the last agent frame = executor (lambda's caller).
             // Inject the annotation AFTER that frame.
