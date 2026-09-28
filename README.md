@@ -29,29 +29,72 @@ Then attach it at startup:
 java -javaagent:lambda-stringer.jar -jar your-app.jar
 ```
 
-### Maven (attach during tests)
+### Maven — attach during tests
+
+Add the dependency so Maven downloads the jar, then tell Surefire to attach it.
+`${settings.localRepository}` resolves to wherever `~/.m2` lives on the machine.
 
 ```xml
-<dependency>
-  <groupId>me.bechberger</groupId>
-  <artifactId>lambda-stringer</artifactId>
-  <version>0.2</version>
-  <scope>test</scope>
-</dependency>
+<dependencies>
+  <dependency>
+    <groupId>me.bechberger</groupId>
+    <artifactId>lambda-stringer</artifactId>
+    <version>0.2</version>
+    <scope>test</scope>
+  </dependency>
+</dependencies>
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-surefire-plugin</artifactId>
+      <configuration>
+        <argLine>-javaagent:${settings.localRepository}/me/bechberger/lambda-stringer/0.2/lambda-stringer-0.2.jar</argLine>
+      </configuration>
+    </plugin>
+  </plugins>
+</build>
 ```
 
-Configure Surefire to attach the agent:
+### Maven — attach at runtime (packaged app)
+
+Use the `maven-dependency-plugin` to copy the jar to a known path during the build,
+then reference it on the command line:
 
 ```xml
-<plugin>
-  <groupId>org.apache.maven.plugins</groupId>
-  <artifactId>maven-surefire-plugin</artifactId>
-  <configuration>
-    <argLine>
-      -javaagent:${settings.localRepository}/me/bechberger/lambda-stringer/0.2/lambda-stringer-0.2.jar
-    </argLine>
-  </configuration>
-</plugin>
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-dependency-plugin</artifactId>
+      <executions>
+        <execution>
+          <id>copy-agent</id>
+          <phase>prepare-package</phase>
+          <goals><goal>copy</goal></goals>
+          <configuration>
+            <artifactItems>
+              <artifactItem>
+                <groupId>me.bechberger</groupId>
+                <artifactId>lambda-stringer</artifactId>
+                <version>0.2</version>
+                <outputDirectory>${project.build.directory}/agents</outputDirectory>
+                <destFileName>lambda-stringer.jar</destFileName>
+              </artifactItem>
+            </artifactItems>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+```
+
+Then attach at startup with a version-independent path:
+
+```sh
+java -javaagent:target/agents/lambda-stringer.jar -jar your-app.jar
 ```
 
 ## What it does
