@@ -30,15 +30,13 @@ log.debug("retry action: {}", retryAction);
 // → retry action: Lambda[Runnable @ PaymentHandler.retryCharge(PaymentHandler.java:63)]
 ```
 
-**Stack traces** — the Proxy frame shows a clean class name:
+**Stack traces** — the agent strips its own frames, so the trace looks identical to the no-agent case:
 ```
 java.lang.IllegalStateException: task failed
     at com.example.OrderService.lambda$process$2(OrderService.java:91)
-    at lambda.tostring.WrappingMetafactory$LambdaHandler.invoke(WrappingMetafactory.java:...)
-    at jdk.proxy1/$Proxy0.run(Unknown Source)
     at com.example.TaskRunner.run(TaskRunner.java:34)
 ```
-The lambda body frame (`lambda$process$2`) is already informative; the agent adds two frames of overhead.
+No extra frames from `LambdaHandler`, `$Proxy`, or `invokeWithArguments`.
 
 **Thread dumps** — the original lambda class name still appears (no regression):
 ```
@@ -215,8 +213,8 @@ enclosing class, method, source file, and line number (via `StackWalker`).
 - **Undeclared checked exceptions** — `java.lang.reflect.Proxy` wraps any checked
   exception not declared by the interface method in `UndeclaredThrowableException`;
   the original exception is always accessible via `getCause()`
-- **Stack traces** — two extra frames appear: `LambdaHandler.invoke` and `$Proxy0.<method>`;
-  the lambda body frame itself is unaffected
+- **Stack traces** — agent frames (`LambdaHandler`, `$Proxy`, `invokeWithArguments`) are stripped
+  from any exception thrown through the proxy, so stack traces look identical to the no-agent case
 
 ## License
 

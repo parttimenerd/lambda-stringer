@@ -175,9 +175,50 @@ public class WrappingMetafactory {
             try {
                 return mh.invokeWithArguments(args);
             } catch (InvocationTargetException ite) {
-                sneakyThrow(ite.getCause());
+                sneakyThrow(stripAgentFrames(ite.getCause()));
+            } catch (Throwable t) {
+                sneakyThrow(stripAgentFrames(t));
             }
             throw new AssertionError("unreachable");
+        }
+
+        /**
+         * Removes agent-internal frames ({@code lambda.tostring.*}, {@code jdk.proxy*},
+         * {@code $Proxy*}, {@code MethodHandle.invokeWithArguments}) from the throwable's
+         * stack trace in-place, then returns it.
+         *
+         * <p>This makes the stack trace look as if the lambda was called directly,
+         * matching the no-agent experience. The mutation is safe because:
+         * <ul>
+         *   <li>The throwable object itself is modified, so it looks clean regardless of
+         *       who prints it (caught handler, uncaught handler, logger, IDE).
+         *   <li>The lambda body frame and all user frames are left intact.
+         * </ul>
+         */
+        private static Throwable stripAgentFrames(Throwable t) {
+            if (t == null) return null;
+            StackTraceElement[] frames = t.getStackTrace();
+            int keep = 0;
+            for (StackTraceElement f : frames) {
+                if (!isAgentFrame(f)) keep++;
+            }
+            if (keep == frames.length) return t; // nothing to strip
+            StackTraceElement[] cleaned = new StackTraceElement[keep];
+            int i = 0;
+            for (StackTraceElement f : frames) {
+                if (!isAgentFrame(f)) cleaned[i++] = f;
+            }
+            t.setStackTrace(cleaned);
+            return t;
+        }
+
+        private static boolean isAgentFrame(StackTraceElement f) {
+            String cls = f.getClassName();
+            return cls.startsWith("lambda.tostring.")
+                || cls.startsWith("jdk.proxy")
+                || cls.contains("$Proxy")
+                || (cls.equals("java.lang.invoke.MethodHandle")
+                    && "invokeWithArguments".equals(f.getMethodName()));
         }
 
         private MethodHandle resolveHandle(Method method) {

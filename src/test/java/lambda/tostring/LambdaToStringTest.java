@@ -536,6 +536,27 @@ public class LambdaToStringTest {
         }
     }
 
+    @Test public void exceptionStackTraceHasNoAgentFrames() {
+        // Stack trace from an exception thrown inside a lambda must look identical
+        // to the no-agent case: no lambda.tostring.*, no $Proxy*, no invokeWithArguments.
+        Runnable r = () -> { throw new RuntimeException("trace-test"); };
+        try {
+            r.run();
+            fail("should have thrown");
+        } catch (RuntimeException e) {
+            for (StackTraceElement frame : e.getStackTrace()) {
+                String cls = frame.getClassName();
+                assertFalse("agent frame leaked into stack trace: " + frame,
+                        cls.startsWith("lambda.tostring."));
+                assertFalse("proxy frame leaked into stack trace: " + frame,
+                        cls.startsWith("jdk.proxy") || cls.contains("$Proxy"));
+                assertFalse("invokeWithArguments frame leaked into stack trace: " + frame,
+                        cls.equals("java.lang.invoke.MethodHandle")
+                        && "invokeWithArguments".equals(frame.getMethodName()));
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // LabelFormat token coverage
     // -----------------------------------------------------------------------
