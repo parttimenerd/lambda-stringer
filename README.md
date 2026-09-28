@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/parttimenerd/lambda-stringer/actions/workflows/ci.yml/badge.svg)](https://github.com/parttimenerd/lambda-stringer/actions/workflows/ci.yml)
 
-A Java agent that gives every lambda and method reference a human-readable `toString()` — no source changes required.
+Lambda and method references are quite opaque in Java. The default `toString()` is a JVM-generated class name and hash code,
+which is not very useful for debugging or logging. This project provides a Java agent that gives every lambda and method 
+reference a human-readable `toString()` without requiring any source code changes.
 
 Without the agent:
 ```
@@ -13,6 +15,19 @@ With the agent:
 ```
 Lambda[Runnable @ com.example.Foo.bar(Foo.java:42)]
 ```
+
+In stack traces, the agent injects a `// ^ via` annotation after the executor frame 
+showing the interface type and the lambda's creation site:
+
+```
+java.lang.NumberFormatException: For input string: "abc"
+    at java.lang.Integer.parseInt(Integer.java:662)
+    at com.example.Parser.parse(Parser.java:7)
+    at // ^ via Lambda[Function @ MyService.configure(MyService.java:34)]
+    at com.example.MyService.configure(MyService.java:35)
+```
+
+The emitted format is configurable, and the agent can be attached at runtime or during tests.
 
 ## Install
 
@@ -99,11 +114,14 @@ java -javaagent:target/agents/lambda-stringer.jar -jar your-app.jar
 
 ## What it does
 
-**Log lambdas stored in queues, fields, or collections:**
+**Readable labels anywhere you log or inspect a lambda:**
 
 ```java
 log.warn("stuck task: {}", runningTask);
 // → stuck task: Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
+
+log.atDebug().addKeyValue("task", task.toString()).log("submitting");
+// → {"level":"DEBUG","task":"Lambda[Runnable @ Scheduler.buildTask(Scheduler.java:42)]",...}
 ```
 
 ```
@@ -113,52 +131,22 @@ log.warn("stuck task: {}", runningTask);
   Lambda[Runnable @ CacheService.evict(CacheService.java:117)]
 ```
 
-**Read clean stack traces** — agent frames are stripped; a `// ^ via` annotation is injected after the executor frame showing the interface type and the lambda's creation site:
-
-```
-java.lang.RuntimeException: task failed
-    at com.example.OrderService.lambda$process$2(OrderService.java:91)
-    at com.example.Registry.runAll(Registry.java:12)
-    at // ^ via Lambda[Runnable @ OrderService.setup(OrderService.java:88)]
-    at com.example.App.main(App.java:20)
-```
-
-For method references, where no lambda body frame appears, this annotation is especially useful:
-
-```
-java.lang.NumberFormatException: For input string: "abc"
-    at java.lang.Integer.parseInt(Integer.java:662)
-    at com.example.Parser.parse(Parser.java:7)
-    at // ^ via Lambda[Function @ MyService.configure(MyService.java:34)]
-    at com.example.MyService.configure(MyService.java:35)
-```
-
-**Assert on lambda identity in tests:**
+**Assertions on lambda identity in tests:**
 
 ```java
-String label = registry.getHandler().toString();
-assertTrue(label.contains("PaymentService.onFailure"));
+assertTrue(registry.getHandler().toString().contains("PaymentService.onFailure"));
 ```
 
-**Embed labels in structured logs:**
-
-```java
-log.atDebug().addKeyValue("task", task.toString()).log("submitting");
-// → {"level":"DEBUG","task":"Lambda[Runnable @ Scheduler.buildTask(Scheduler.java:42)]",...}
-```
+**Clean stack traces** — agent frames are stripped; the `// ^ via` annotation shown in the intro is injected automatically for both lambda bodies and method references.
 
 ## Custom format
 
-Pass a `format=` argument to the agent:
+Pass a `format=` argument to the agent or set a system property:
 
 ```sh
 java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
 # → com.example.Scheduler#buildTask:42
-```
 
-Or set a system property before the agent loads:
-
-```sh
 java -Dlambda.tostring.format="%s::%m:%l" -javaagent:lambda-stringer.jar ...
 # → Scheduler::buildTask:42
 ```
@@ -187,23 +175,21 @@ Labels are computed **once per call site** at class-load time — `toString()` i
 | Invoke pre-created lambda   | ~1 ns         | ~35 ns (Proxy dispatch)               |
 | `toString()` on lambda      | ~4 ns         | ~4 ns (field read)                    |
 
-_M-series Mac; results vary by JVM and hardware. Run `make bench` and `make bench-baseline` to measure on your hardware._
+_M-series Mac. Run `make bench` / `make bench-baseline` to measure on your hardware._
 
-The ~35 ns Proxy dispatch overhead per invocation is negligible for any real workload. It shows up only in tight microbenchmarks that invoke a trivial lambda millions of times.
+The ~35 ns per-invocation overhead is negligible for real workloads; it only shows up in microbenchmarks invoking a trivial lambda in a tight loop.
 
 ## How it works
 
-Lambda classes are *hidden classes* (Java 15+) and are never passed to a `ClassFileTransformer`, so they cannot be instrumented directly.
-
-Instead, the agent rewrites `invokedynamic` bootstrap references in *caller* classes at load time, redirecting `LambdaMetafactory` → `WrappingMetafactory`. The wrapper chains the real lambda through a `java.lang.reflect.Proxy` that overrides `toString()` with a label computed once at bootstrap time from the enclosing class, method, source file, and line number (via `StackWalker`). `Serializable` lambdas are left unwrapped to preserve serialization round-trips.
+Lambda classes are *hidden classes* (Java 15+) — never passed to a `ClassFileTransformer`, so they can't be instrumented directly. Instead, the agent rewrites `invokedynamic` bootstrap references in *caller* classes at load time, redirecting `LambdaMetafactory` → `WrappingMetafactory`. The wrapper chains the real lambda through a `java.lang.reflect.Proxy` that overrides `toString()` with a label computed once at bootstrap time via `StackWalker`. `Serializable` lambdas are left unwrapped to preserve serialization round-trips.
 
 ## Limitations
 
 - **Java 25+ required** — uses `java.lang.classfile` (GA in Java 24) and `StackWalker`
-- **`Serializable` lambdas** — not wrapped; they report the default JVM `toString()`
-- **Classes loaded before agent installation** — lambdas in those classes are not instrumented
-- **JDK-internal lambdas** — lambdas created by `java/util/function/` default methods (`andThen`, `compose`, `negate`, `reversed`, etc.) are from JDK classes loaded before the agent; their `toString()` returns the default JVM representation
-- **Undeclared checked exceptions** — `Proxy` wraps undeclared checked exceptions in `UndeclaredThrowableException`; the original is always in `getCause()`
+- **`Serializable` lambdas** — not wrapped; report the default JVM `toString()`
+- **Classes loaded before agent installation** — not instrumented
+- **JDK-internal lambdas** — `andThen`, `compose`, `negate`, etc. come from JDK classes loaded before the agent; their `toString()` returns the default JVM representation
+- **Undeclared checked exceptions** — `Proxy` wraps them in `UndeclaredThrowableException`; original always in `getCause()`
 
 ## Build from source
 
