@@ -204,17 +204,21 @@ public class WrappingMetafactory {
 
         /**
          * Strips agent-internal frames from {@code t}'s stack trace and injects a
-         * synthetic "lambda created at" frame immediately after the innermost user frame.
+         * synthetic "via λ created in" frame immediately after the executor frame
+         * (the first non-agent frame after the last agent frame — i.e. the code
+         * that called the lambda).
          *
          * <p>The result looks like:
          * <pre>
-         *   at com.example.Foo.lambda$bar$0(Foo.java:42)     ← lambda body / method ref target
-         *   at // Runnable lambda created in com.example.Foo.bar(Foo.java:42)  ← injected
-         *   at com.example.Executor.run(Executor.java:10)    ← caller of the lambda
+         *   at Integer.parseInt(Integer.java:662)                ← what ran inside the lambda
+         *   at Parser.parse(Executor.java:7)                     ← who called the lambda
+         *   at // ^ via λ created in Foo.main(Foo.java:13)       ← injected: where lambda came from
+         *   at Foo.main(Foo.java:14)                             ← broader context
          * </pre>
          *
-         * <p>The synthetic frame uses the real source file and line number so IDEs
-         * can navigate to the creation site on click.
+         * <p>Placing the annotation after the executor frame makes it easy to see both
+         * which code called the lambda (the frame above) and where the lambda was
+         * defined (the annotation itself, with a clickable file/line).
          *
          * <p>The mutation is on the throwable object itself, so the clean trace is
          * visible regardless of who prints it — caught handler, uncaught handler, logger, IDE.
@@ -223,22 +227,19 @@ public class WrappingMetafactory {
             if (t == null) return null;
             StackTraceElement[] frames = t.getStackTrace();
 
-            // Find where the proxy call boundary is: the last agent frame.
-            // The synthetic "created at" frame belongs right after that boundary
-            // (i.e., before the first non-agent frame that follows the last agent frame).
-            // This places it between the lambda's own execution frames and the caller.
+            // Find the proxy call boundary: the last agent frame.
+            // The first non-agent frame after it is the executor (the caller of the lambda).
+            // We insert the annotation AFTER that executor frame.
             int lastAgentIdx = -1;
             for (int i = 0; i < frames.length; i++) {
                 if (isAgentFrame(frames[i])) lastAgentIdx = i;
             }
 
-            // Count kept frames and determine where to insert.
-            // insertBefore = index in original frames[] of the first non-agent frame
-            // that comes AFTER the last agent frame (= the caller of the lambda).
-            int insertBefore = -1;
+            // insertAfter = index in original frames[] of the executor frame.
+            int insertAfter = -1;
             if (lastAgentIdx >= 0) {
                 for (int i = lastAgentIdx + 1; i < frames.length; i++) {
-                    if (!isAgentFrame(frames[i])) { insertBefore = i; break; }
+                    if (!isAgentFrame(frames[i])) { insertAfter = i; break; }
                 }
             }
 
@@ -246,32 +247,32 @@ public class WrappingMetafactory {
             for (StackTraceElement f : frames) {
                 if (!isAgentFrame(f)) keepCount++;
             }
-            boolean inject = insertBefore >= 0;
+            boolean inject = insertAfter >= 0;
             StackTraceElement[] result = new StackTraceElement[keepCount + (inject ? 1 : 0)];
             int out = 0;
             boolean injected = false;
             for (int i = 0; i < frames.length; i++) {
                 if (isAgentFrame(frames[i])) continue;
-                if (!injected && inject && i == insertBefore) {
+                result[out++] = frames[i];
+                if (!injected && inject && i == insertAfter) {
                     result[out++] = creationFrame();
                     injected = true;
                 }
-                result[out++] = frames[i];
             }
             t.setStackTrace(result);
             return t;
         }
 
         /**
-         * Builds the synthetic "lambda created at" StackTraceElement.
+         * Builds the synthetic annotation StackTraceElement.
          *
-         * <p>The className is a human-readable annotation prefixed with {@code "// "} so it
-         * reads like a comment in terminal output. The real file/line are preserved so IDEs
-         * can parse them and make the frame navigable.
+         * <p>Format: {@code "// ^ via λ created in EnclosingClass.method(File.java:line)"}
+         * The {@code ^} arrow points to the executor frame above it.
+         * The real file/line are preserved so IDEs can navigate to the creation site on click.
          */
         private StackTraceElement creationFrame() {
             return new StackTraceElement(
-                    "// λ created in " + creationClass,
+                    "// ^ via λ created in " + creationClass,
                     creationMethod,
                     creationFile,
                     creationLine);
