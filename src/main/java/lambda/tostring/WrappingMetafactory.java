@@ -195,7 +195,11 @@ public class WrappingMetafactory {
             // avoiding the per-element boxing that invokeWithArguments performs internally.
             MethodHandle mh = cachedHandle;
             if (mh == null) {
-                mh = resolveHandle(method);
+                // Capture the lookup into a local BEFORE nulling it.
+                // Without this, a racing thread could null callerLookup between our
+                // cachedHandle==null check and the resolveHandle() call, causing NPE.
+                MethodHandles.Lookup lookup = callerLookup;
+                mh = resolveHandle(method, lookup);
                 // Null the lookup before publishing the handle: any reader that observes
                 // cachedHandle != null is guaranteed to see callerLookup == null.
                 callerLookup = null;
@@ -266,11 +270,14 @@ public class WrappingMetafactory {
 
             // First non-agent frame after the last agent frame = executor (lambda's caller).
             // Inject the annotation AFTER that frame.
+            // If no user frame follows (very shallow stack), inject at the end.
             int insertAfter = -1;
             if (annotate && lastAgentIdx >= 0) {
                 for (int i = lastAgentIdx + 1; i < frames.length; i++) {
                     if (!isAgentFrame(frames[i])) { insertAfter = i; break; }
                 }
+                // No user frame after the last agent frame — append at end.
+                if (insertAfter < 0) insertAfter = frames.length - 1;
             }
 
             boolean inject = insertAfter >= 0;
@@ -312,13 +319,14 @@ public class WrappingMetafactory {
                     && "invokeWithArguments".equals(f.getMethodName()));
         }
 
-        private MethodHandle resolveHandle(Method method) {
+        private MethodHandle resolveHandle(Method method, MethodHandles.Lookup lookup) {
+            if (lookup == null) return null; // lost the race; fallback to Method.invoke
             try {
-                return callerLookup.unreflect(method).bindTo(delegate);
+                return lookup.unreflect(method).bindTo(delegate);
             } catch (IllegalAccessException e) {
                 try {
                     return MethodHandles.privateLookupIn(
-                            method.getDeclaringClass(), callerLookup)
+                            method.getDeclaringClass(), lookup)
                         .unreflect(method).bindTo(delegate);
                 } catch (Exception ex) {
                     try {
