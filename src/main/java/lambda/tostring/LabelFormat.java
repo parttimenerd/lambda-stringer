@@ -6,8 +6,10 @@ package lambda.tostring;
  * <p>Supported tokens:
  * <table>
  *   <tr><td>{@code %i}</td><td>functional interface simple name (e.g. {@code Runnable})</td></tr>
- *   <tr><td>{@code %c}</td><td>enclosing class fully-qualified name (e.g. {@code com.example.Foo})</td></tr>
+ *   <tr><td>{@code %I}</td><td>functional interface fully-qualified name (e.g. {@code java.lang.Runnable})</td></tr>
  *   <tr><td>{@code %s}</td><td>enclosing class simple name (e.g. {@code Foo})</td></tr>
+ *   <tr><td>{@code %S}</td><td>enclosing class fully-qualified name (e.g. {@code com.example.Foo})</td></tr>
+ *   <tr><td>{@code %c}</td><td>alias for {@code %S} — enclosing class fully-qualified name</td></tr>
  *   <tr><td>{@code %m}</td><td>enclosing method name (e.g. {@code bar})</td></tr>
  *   <tr><td>{@code %f}</td><td>source file name (e.g. {@code Foo.java})</td></tr>
  *   <tr><td>{@code %l}</td><td>line number, or {@code ?} if unavailable</td></tr>
@@ -61,23 +63,24 @@ public final class LabelFormat {
     /**
      * Formats a label by substituting tokens in the current pattern.
      *
-     * @param iface     functional interface simple name
-     * @param classFqn  enclosing class fully-qualified name
-     * @param method    enclosing method name
-     * @param file      source file name
-     * @param line      line number (&lt;= 0 means unavailable, renders as {@code ?})
+     * @param ifaceSimple  functional interface simple name
+     * @param ifaceFqn     functional interface fully-qualified name
+     * @param classFqn     enclosing class fully-qualified name
+     * @param method       enclosing method name
+     * @param file         source file name
+     * @param line         line number (&lt;= 0 means unavailable, renders as {@code ?})
      */
-    public static String format(String iface, String classFqn, String method,
-                                String file, int line) {
-        return format(iface, classFqn, method, file, line, pattern);
+    public static String format(String ifaceSimple, String ifaceFqn, String classFqn,
+                                String method, String file, int line) {
+        return format(ifaceSimple, ifaceFqn, classFqn, method, file, line, pattern);
     }
 
     /**
      * Formats a label using an explicit pattern (ignores the configured default).
      * Useful for tests and one-off formatting.
      */
-    public static String format(String iface, String classFqn, String method,
-                                String file, int line, String pat) {
+    public static String format(String ifaceSimple, String ifaceFqn, String classFqn,
+                                String method, String file, int line, String pat) {
         StringBuilder sb = new StringBuilder(pat.length() + 64);
         int i = 0;
         int len = pat.length();
@@ -86,11 +89,12 @@ public final class LabelFormat {
             if (c == '%' && i + 1 < len) {
                 char token = pat.charAt(i + 1);
                 switch (token) {
-                    case 'i' -> { sb.append(iface);              i += 2; }
-                    case 'c' -> { sb.append(classFqn);           i += 2; }
-                    case 's' -> { sb.append(simpleOf(classFqn)); i += 2; }
-                    case 'm' -> { sb.append(method);             i += 2; }
-                    case 'f' -> { sb.append(file);               i += 2; }
+                    case 'i' -> { sb.append(ifaceSimple);           i += 2; }
+                    case 'I' -> { sb.append(ifaceFqn);              i += 2; }
+                    case 's' -> { sb.append(simpleOf(classFqn));    i += 2; }
+                    case 'S', 'c' -> { sb.append(classFqn);         i += 2; }
+                    case 'm' -> { sb.append(method);                i += 2; }
+                    case 'f' -> { sb.append(file);                  i += 2; }
                     case 'l' -> {
                         if (line > 0) sb.append(line); else sb.append('?');
                         i += 2;

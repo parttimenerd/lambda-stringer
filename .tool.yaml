@@ -83,24 +83,26 @@ how_to:
 
     Available tokens:
 
-    | Token | Meaning                              | Example           |
-    |-------|--------------------------------------|-------------------|
-    | `%i`  | functional interface simple name     | `Runnable`        |
-    | `%c`  | enclosing class fully-qualified name | `com.example.Foo` |
-    | `%s`  | enclosing class simple name          | `Foo`             |
-    | `%m`  | enclosing method name                | `bar`             |
-    | `%f`  | source file name                     | `Foo.java`        |
-    | `%l`  | line number (`?` if unavailable)     | `42`              |
-    | `%%`  | literal `%`                          | `%`               |
+    | Token | Meaning                                      | Example                    |
+    |-------|----------------------------------------------|----------------------------|
+    | `%i`  | functional interface simple name             | `Runnable`                 |
+    | `%I`  | functional interface fully-qualified name    | `java.lang.Runnable`       |
+    | `%s`  | enclosing class simple name                  | `Foo`                      |
+    | `%S`  | enclosing class fully-qualified name         | `com.example.Foo`          |
+    | `%c`  | alias for `%S`                               | `com.example.Foo`          |
+    | `%m`  | enclosing method name                        | `bar`                      |
+    | `%f`  | source file name                             | `Foo.java`                 |
+    | `%l`  | line number (`?` if unavailable)             | `42`                       |
+    | `%%`  | literal `%`                                  | `%`                        |
 
     ```sh
     # Compact format for log parsers
-    java -javaagent:lambda-stringer.jar=format=%c#%m:%l -jar your-app.jar
+    java -javaagent:lambda-stringer.jar=format=%S#%m:%l -jar your-app.jar
     # → com.example.Scheduler#buildTask:42
 
-    # Via system property
-    java -Dlambda.tostring.format="%s::%m:%l" -javaagent:lambda-stringer.jar ...
-    # → Scheduler::buildTask:42
+    # Simple class name only
+    java -Dlambda.tostring.format="%i@%s:%l" -javaagent:lambda-stringer.jar ...
+    # → Runnable@Scheduler:42
     ```
 
 - title: Read clean stack traces

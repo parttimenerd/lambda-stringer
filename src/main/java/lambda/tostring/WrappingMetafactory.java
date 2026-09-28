@@ -347,10 +347,12 @@ public class WrappingMetafactory {
 
     private static LabelInfo buildLabelInfo(MethodHandles.Lookup caller, MethodType factoryType,
                                             MethodHandle implMethod) {
-        String iface     = factoryType.returnType().getSimpleName();
-        String encClass  = caller.lookupClass().getName();
-        String implName  = extractMethodName(caller, implMethod);
-        String file      = topLevelSourceFile(caller.lookupClass());
+        Class<?> ifaceClass  = factoryType.returnType();
+        String ifaceSimple   = ifaceClass.getSimpleName();
+        String ifaceFqn      = ifaceClass.getName();
+        String encClass      = caller.lookupClass().getName();
+        String implName      = extractMethodName(caller, implMethod);
+        String file          = topLevelSourceFile(caller.lookupClass());
 
         // Single stack walk to capture both line number and enclosing method name.
         FrameInfo fi;
@@ -365,7 +367,7 @@ public class WrappingMetafactory {
             fi = new FrameInfo("lambda", -1);
         }
 
-        String label = LabelFormat.format(iface, encClass, implName, file, fi.line());
+        String label = LabelFormat.format(ifaceSimple, ifaceFqn, encClass, implName, file, fi.line());
         return new LabelInfo(label, fi.method(), file, fi.line());
     }
 

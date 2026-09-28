@@ -568,37 +568,54 @@ public class LambdaToStringTest {
     }
 
     @Test public void labelFormatAllTokens() {
-        String result = LabelFormat.format("Runnable", "com.example.Foo", "bar", "Foo.java", 42);
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "com.example.Foo", "bar", "Foo.java", 42);
         assertEquals("Lambda[Runnable @ com.example.Foo.bar(Foo.java:42)]", result);
     }
 
     @Test public void labelFormatMissingLine() {
-        String result = LabelFormat.format("Runnable", "com.example.Foo", "bar", "Foo.java", -1);
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "com.example.Foo", "bar", "Foo.java", -1);
         assertEquals("Lambda[Runnable @ com.example.Foo.bar(Foo.java:?)]", result);
     }
 
     @Test public void labelFormatSimpleClass() {
-        String result = LabelFormat.format("Supplier", "com.example.Foo", "main", "Foo.java", 10,
-                LabelFormat.DEFAULT_PATTERN.replace("%c", "%s"));
-        // %s should give just "Foo"
+        // %s = simple class name, %S = FQN class name
+        String result = LabelFormat.format("Supplier", "java.util.function.Supplier", "com.example.Foo", "main", "Foo.java", 10,
+                "%i @ %s.%m(%f:%l)");
         assertTrue("expected simple class name 'Foo', got: " + result, result.contains("Foo.main"));
         assertFalse("should not contain full package", result.contains("com.example.Foo.main"));
     }
 
+    @Test public void labelFormatFqnClassToken() {
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "com.example.Foo", "bar", "Foo.java", 1,
+                "%s|%S");
+        assertEquals("Foo|com.example.Foo", result);
+    }
+
     @Test public void labelFormatCustomPattern() {
-        String pat = "%i|%c|%m|%f|%l";
-        String result = LabelFormat.format("Runnable", "pkg.C", "m", "C.java", 7, pat);
+        String pat = "%i|%S|%m|%f|%l";
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "pkg.C", "m", "C.java", 7, pat);
         assertEquals("Runnable|pkg.C|m|C.java|7", result);
     }
 
+    @Test public void labelFormatFqnInterfaceToken() {
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "pkg.C", "m", "C.java", 7, "%I|%i");
+        assertEquals("java.lang.Runnable|Runnable", result);
+    }
+
+    @Test public void labelFormatCAlias() {
+        // %c is a backward-compat alias for %S
+        String result = LabelFormat.format("Runnable", "java.lang.Runnable", "pkg.C", "m", "C.java", 7, "%c|%S");
+        assertEquals("pkg.C|pkg.C", result);
+    }
+
     @Test public void labelFormatEscapedPercent() {
-        String result = LabelFormat.format("X", "a.B", "c", "B.java", 1, "100%%");
+        String result = LabelFormat.format("X", "a.X", "a.B", "c", "B.java", 1, "100%%");
         assertEquals("100%", result);
     }
 
     @Test public void labelFormatUnknownTokenPassedThrough() {
         // Unknown token %z: the % is emitted literally, z is left as-is
-        String result = LabelFormat.format("X", "a.B", "c", "B.java", 1, "%z");
+        String result = LabelFormat.format("X", "a.X", "a.B", "c", "B.java", 1, "%z");
         assertEquals("%z", result);
     }
 
@@ -651,7 +668,7 @@ public class LambdaToStringTest {
         // The comma is part of the pattern, not a key separator.
         LabelFormat.configure("format=Lambda[%i,%c]");
         try {
-            String result = LabelFormat.format("Runnable", "pkg.Foo", "m", "Foo.java", 1);
+            String result = LabelFormat.format("Runnable", "java.lang.Runnable", "pkg.Foo", "m", "Foo.java", 1);
             assertEquals("Lambda[Runnable,pkg.Foo]", result);
         } finally {
             // Restore default so other tests are not affected
@@ -663,7 +680,7 @@ public class LambdaToStringTest {
         // Other keys before format= must still work, and pattern preserves commas
         LabelFormat.configure("verbose=true,format=%i,%c");
         try {
-            String result = LabelFormat.format("Runnable", "pkg.Foo", "m", "Foo.java", 1);
+            String result = LabelFormat.format("Runnable", "java.lang.Runnable", "pkg.Foo", "m", "Foo.java", 1);
             assertEquals("Runnable,pkg.Foo", result);
         } finally {
             LabelFormat.configure("format=" + LabelFormat.DEFAULT_PATTERN);
