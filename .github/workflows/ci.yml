@@ -44,17 +44,27 @@ jobs:
       - name: Build jar (skip tests — already passed in build job)
         run: mvn package -DskipTests --no-transfer-progress
 
-      - name: Delete previous latest release
+      - name: Delete previous latest tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release delete latest --yes --cleanup-tag 2>/dev/null || true
 
-      - name: Publish latest release
+      - name: Publish per-commit release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SHA="${{ github.sha }}"
+          SHORT="${SHA:0:7}"
+          DATE="$(git log -1 --format='%as')"
+          SUBJECT="$(git log -1 --format='%s')"
+          BODY="$(git log -1 --format='%b')"
+          gh release create "v0-${SHORT}" \
+            --title "${SUBJECT} (${DATE})" \
+            --notes "${BODY}Commit: \`${SHA}\`" \
+            target/lambda-stringer-1.0.jar#lambda-stringer-1.0.jar
+          # Also update the floating "latest" tag to this release for easy wget access.
           gh release create latest \
-            --title "Latest build ($(git log -1 --format='%as'))" \
-            --notes "$(git log -1 --format='%s%n%n%b')Built from commit ${{ github.sha }}." \
+            --title "Latest: ${SUBJECT} (${DATE})" \
+            --notes "Latest build. See [v0-${SHORT}](https://github.com/${{ github.repository }}/releases/tag/v0-${SHORT}) for details." \
             --prerelease \
             target/lambda-stringer-1.0.jar#lambda-stringer-1.0.jar
