@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-release:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,24 +18,43 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+          cache: maven
 
       - name: Build and test
-        run: mvn -q package
+        run: mvn package --no-transfer-progress
 
-      - name: Delete previous release (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  release:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build jar (skip tests — already passed in build job)
+        run: mvn package -DskipTests --no-transfer-progress
+
+      - name: Delete previous latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+        run: gh release delete latest --yes --cleanup-tag 2>/dev/null || true
 
-      - name: Create release (push to main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Publish latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create latest \
-            --title "Latest build" \
-            --notes "Built from commit ${{ github.sha }}" \
+            --title "Latest build ($(git log -1 --format='%as'))" \
+            --notes "$(git log -1 --format='%s%n%n%b')Built from commit ${{ github.sha }}." \
             --prerelease \
-            target/lambda-stringer-1.0.jar
+            target/lambda-stringer-1.0.jar#lambda-stringer-1.0.jar
