@@ -101,4 +101,4 @@ enclosing class, method, source file, and line number (via `StackWalker`).
 
 ## License
 
-MIT, Copyright 2024 SAP SE or an SAP affiliate company, Johannes Bechberger and lambda-stringer contributors
+MIT, Copyright 2026 SAP SE or an SAP affiliate company, Johannes Bechberger and lambda-stringer contributors
