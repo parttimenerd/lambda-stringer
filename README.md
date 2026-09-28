@@ -14,7 +14,39 @@ With the agent:
 Lambda[Runnable @ com.example.Foo.bar(Foo.java:42)]
 ```
 
-This is useful for logging, debugging, and any place where you want to know *which* lambda you are looking at without adding manual labels throughout your codebase.
+## Where it helps
+
+**Logging queues and collections of lambdas:**
+```
+=== Pending tasks ===
+  Lambda[Runnable @ OrderService.processOrder(OrderService.java:88)]
+  Lambda[Runnable @ NotificationService.sendEmail(NotificationService.java:42)]
+  Lambda[Runnable @ CacheService.evict(CacheService.java:117)]
+```
+
+**Debugging which lambda is stored in a field or passed as a callback:**
+```java
+log.debug("retry action: {}", retryAction);
+// → retry action: Lambda[Runnable @ PaymentHandler.retryCharge(PaymentHandler.java:63)]
+```
+
+**Stack traces** — the Proxy frame shows a clean class name:
+```
+java.lang.IllegalStateException: task failed
+    at com.example.OrderService.lambda$process$2(OrderService.java:91)
+    at lambda.tostring.WrappingMetafactory$LambdaHandler.invoke(WrappingMetafactory.java:...)
+    at jdk.proxy1/$Proxy0.run(Unknown Source)
+    at com.example.TaskRunner.run(TaskRunner.java:34)
+```
+The lambda body frame (`lambda$process$2`) is already informative; the agent adds two frames of overhead.
+
+**Thread dumps** — the original lambda class name still appears (no regression):
+```
+"worker-thread" WAITING
+    at ...
+    at com.example.App.lambda$main$0(App.java:17)
+    at com.example.App$$Lambda/0x...run(Unknown Source)
+```
 
 ## Requirements
 
@@ -26,7 +58,7 @@ Java 25+
 git clone https://github.com/parttimenerd/lambda-stringer
 cd lambda-stringer
 mvn package -DskipTests    # builds target/lambda-stringer-1.0.jar
-mvn test                   # build + run all tests
+mvn package                # build + run all tests
 ```
 
 Or with Make:
@@ -94,10 +126,17 @@ enclosing class, method, source file, and line number (via `StackWalker`).
 
 ## Limitations
 
-- Requires Java 25 (uses `java.lang.classfile` and `StackWalker`)
-- `Serializable` lambdas report their default JVM `toString()`, not a label
-- The label is baked in at call-site bootstrap time; if a class is loaded before the
-  agent is installed the lambdas in that class are not instrumented
+- **Java 25+ required** — uses `java.lang.classfile` (GA in Java 24) and `StackWalker`
+- **`Serializable` lambdas** — not wrapped; they report the default JVM `toString()`
+- **Classes loaded before agent installation** — lambdas in those classes are not instrumented
+- **JDK-internal lambdas** — lambdas created by `java/util/function/` default methods
+  (`andThen`, `compose`, `negate`, `reversed`, etc.) come from JDK classes that are
+  loaded before the agent runs and cannot be instrumented
+- **Undeclared checked exceptions** — `java.lang.reflect.Proxy` wraps any checked
+  exception not declared by the interface method in `UndeclaredThrowableException`;
+  the original exception is always accessible via `getCause()`
+- **Stack traces** — two extra frames appear: `LambdaHandler.invoke` and `$Proxy0.<method>`;
+  the lambda body frame itself is unaffected
 
 ## License
 

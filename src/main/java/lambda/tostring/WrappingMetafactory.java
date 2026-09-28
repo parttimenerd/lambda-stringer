@@ -1,6 +1,7 @@
 package lambda.tostring;
 
 import java.lang.invoke.*;
+import java.lang.reflect.*;
 
 /**
  * Bootstrap method replacement for LambdaMetafactory.
@@ -99,49 +100,68 @@ public class WrappingMetafactory {
         // which would break ObjectOutputStream. Correctness > toString label.
         if (delegate instanceof java.io.Serializable) return delegate;
 
-        return java.lang.reflect.Proxy.newProxyInstance(
+        return Proxy.newProxyInstance(
                 delegate.getClass().getClassLoader(),
                 new Class<?>[]{ ifaceType },
-                (proxy, method, args) -> {
-                    // toString: return the pre-built label
-                    if (method.getName().equals("toString") && (args == null || args.length == 0))
-                        return label;
+                new LambdaHandler(callerLookup, label, delegate));
+    }
 
-                    // Route Object-declared methods through proxy identity so that
-                    // proxy.equals(proxy) == true and collections work correctly.
-                    // Note: check *both* the declaring class AND the method name, because
-                    // some interfaces re-declare Object methods (e.g. Comparator.equals) —
-                    // those re-declarations have declaring class = the interface, not Object,
-                    // but we still want proxy identity semantics for them.
-                    String name = method.getName();
-                    if (method.getDeclaringClass() == Object.class
-                            || ((name.equals("equals") || name.equals("hashCode"))
-                                && (args == null ? 0 : args.length) <= 1
-                                && method.getDeclaringClass().isInterface())) {
-                        return switch (name) {
-                            case "toString" -> label;
-                            case "equals"   -> proxy == (args != null ? args[0] : null);
-                            case "hashCode" -> System.identityHashCode(proxy);
-                            default         -> method.invoke(delegate, args);
-                        };
-                    }
+    /**
+     * InvocationHandler that delegates all calls to the real lambda except toString().
+     *
+     * <p>Named class (not a lambda) to avoid inserting a {@code WrappingMetafactory$$Lambda}
+     * frame into stack traces every time a proxy method is invoked.
+     */
+    static final class LambdaHandler implements InvocationHandler {
 
-                    // All other methods: delegate via caller's lookup so package-private
-                    // interfaces (inaccessible to WrappingMetafactory) are reachable.
-                    // Use sneakyThrow to rethrow the exact exception from the delegate —
-                    // if we let it propagate normally from the InvocationHandler, Proxy
-                    // wraps undeclared checked exceptions in UndeclaredThrowableException.
-                    try {
-                        return callerLookup.unreflect(method).bindTo(delegate).invokeWithArguments(args);
-                    } catch (IllegalAccessException e) {
-                        try {
-                            return method.invoke(delegate, args);
-                        } catch (java.lang.reflect.InvocationTargetException ite) {
-                            sneakyThrow(ite.getCause());
-                        }
-                    }
-                    throw new AssertionError("unreachable");
-                });
+        private final MethodHandles.Lookup callerLookup;
+        private final String               label;
+        private final Object               delegate;
+
+        LambdaHandler(MethodHandles.Lookup callerLookup, String label, Object delegate) {
+            this.callerLookup = callerLookup;
+            this.label        = label;
+            this.delegate     = delegate;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            // toString: return the pre-built label.
+            if (method.getName().equals("toString") && (args == null || args.length == 0))
+                return label;
+
+            // Route Object-declared methods through proxy identity so that
+            // proxy.equals(proxy) == true and collections work correctly.
+            // Also covers interfaces that re-declare Object methods (e.g. Comparator.equals):
+            // those have declaring class = interface, but we still want identity semantics.
+            String name = method.getName();
+            if (method.getDeclaringClass() == Object.class
+                    || ((name.equals("equals") || name.equals("hashCode"))
+                        && args != null && args.length <= 1
+                        && method.getDeclaringClass().isInterface())) {
+                return switch (name) {
+                    case "toString" -> label;
+                    case "equals"   -> proxy == (args != null ? args[0] : null);
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    default         -> method.invoke(delegate, args);
+                };
+            }
+
+            // All other methods: delegate via caller's lookup so package-private
+            // interfaces (inaccessible to WrappingMetafactory) are reachable.
+            try {
+                return callerLookup.unreflect(method).bindTo(delegate).invokeWithArguments(args);
+            } catch (IllegalAccessException e) {
+                // Fallback: direct reflection. Unwrap InvocationTargetException so the
+                // original cause propagates rather than being wrapped again.
+                try {
+                    return method.invoke(delegate, args);
+                } catch (InvocationTargetException ite) {
+                    sneakyThrow(ite.getCause());
+                }
+            }
+            throw new AssertionError("unreachable");
+        }
     }
 
     // --- Label construction ---
@@ -162,20 +182,35 @@ public class WrappingMetafactory {
     }
 
     /**
-     * Extracts the bare method name from the impl MethodHandle's string representation.
-     * MethodHandle.toString() is not a stable API, so this is best-effort: on failure
-     * the name falls back to "lambda".
+     * Extracts the method name from the impl MethodHandle using {@link MethodHandles.Lookup#revealDirect}.
+     * Falls back to parsing {@code toString()} for indirect handles, then to {@code "lambda"}.
      *
-     * Example: "MethodHandle(Foo)void lambda$main$0()" → "lambda$main$0"
+     * <p>Examples:
+     * <ul>
+     *   <li>Lambda body {@code () -> {}}   → {@code "lambda$main$0"}
+     *   <li>Static ref  {@code Foo::bar}   → {@code "bar"}
+     *   <li>Instance ref {@code s::length} → {@code "length"}
+     *   <li>Constructor ref {@code Foo::new} → {@code "new"}
+     * </ul>
      */
     private static String extractMethodName(MethodHandle implMethod) {
         if (implMethod == null) return "lambda";
+        // Preferred: stable API that works for both lambda bodies and method references.
+        try {
+            MethodHandleInfo info = MethodHandles.lookup().revealDirect(implMethod);
+            String name = info.getName();
+            return "<init>".equals(name) ? "new" : name;
+        } catch (IllegalArgumentException ignored) {
+            // Not a direct handle (e.g. adapter or bound handle) — fall through
+        }
+        // Fallback: parse "MethodHandle(...)ReturnType methodName()" from toString().
+        // This format was observed on some JVM versions for lambda bodies.
         String s    = implMethod.toString();
         int space   = s.lastIndexOf(' ');
         int paren   = s.indexOf('(', Math.max(0, space + 1));
-        // Validate that both markers were found and are in the right order
-        if (space < 0 || paren < 0 || space + 1 >= paren) return "lambda";
-        return s.substring(space + 1, paren);
+        if (space >= 0 && paren >= 0 && space + 1 < paren)
+            return s.substring(space + 1, paren);
+        return "lambda";
     }
 
     /**
@@ -204,12 +239,11 @@ public class WrappingMetafactory {
 
     /**
      * Rethrows {@code t} without declaring it, bypassing the compiler's checked-exception
-     * rules. Used in the InvocationHandler so that undeclared checked exceptions thrown by
-     * the delegate propagate with their original type instead of being wrapped by Proxy in
-     * UndeclaredThrowableException.
+     * rules. Used in the InvocationHandler fallback so that undeclared checked exceptions
+     * thrown by the delegate propagate with their original type.
      */
     @SuppressWarnings("unchecked")
-    private static <E extends Throwable> void sneakyThrow(Throwable t) throws E {
+    static <E extends Throwable> void sneakyThrow(Throwable t) throws E {
         throw (E) t;
     }
 }
