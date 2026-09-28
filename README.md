@@ -114,7 +114,7 @@ java -javaagent:target/agents/lambda-stringer.jar -jar your-app.jar
 
 ## What it does
 
-**Readable labels anywhere you log or inspect a lambda:**
+Works anywhere you log, inspect, or assert on a lambda — no source changes needed:
 
 ```java
 log.warn("stuck task: {}", runningTask);
@@ -122,6 +122,8 @@ log.warn("stuck task: {}", runningTask);
 
 log.atDebug().addKeyValue("task", task.toString()).log("submitting");
 // → {"level":"DEBUG","task":"Lambda[Runnable @ Scheduler.buildTask(Scheduler.java:42)]",...}
+
+assertTrue(registry.getHandler().toString().contains("PaymentService.onFailure"));
 ```
 
 ```
@@ -131,13 +133,7 @@ log.atDebug().addKeyValue("task", task.toString()).log("submitting");
   Lambda[Runnable @ CacheService.evict(CacheService.java:117)]
 ```
 
-**Assertions on lambda identity in tests:**
-
-```java
-assertTrue(registry.getHandler().toString().contains("PaymentService.onFailure"));
-```
-
-**Clean stack traces** — agent frames are stripped; the `// ^ via` annotation shown in the intro is injected automatically for both lambda bodies and method references.
+The `// ^ via` stack trace annotation (shown in the intro) is injected automatically for both lambda bodies and method references.
 
 ## Custom format
 
